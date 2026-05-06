@@ -24,7 +24,7 @@ use crate::{
     ConnectionEvent, Duration, Instant, Path, VarInt,
     endpoint::ensure_ipv6,
     mutex::{Mutex, MutexGuard},
-    path::OpenPath,
+    path::{OpenPath, PathRef, PathRefOwner},
     recv_stream::RecvStream,
     runtime::{AsyncTimer, Runtime, UdpSender},
     send_stream::SendStream,
@@ -1414,13 +1414,16 @@ pub(crate) struct State {
     /// Tracks reference counts for paths.
     ///
     /// I.e. how many [`Path`] and [`WeakPathHandle`] structs are alive for a path.
+    /// Each entry's [`PathRefOwner`] holds an [`AtomicUsize`] so that cloning or
+    /// dropping a [`PathRef`] (held by [`Path`] or [`WeakPathHandle`]) does not need
+    /// to lock this state.
     ///
     /// [`WeakPathHandle`]: crate::path::WeakPathHandle
-    pub(crate) path_refs: FxHashMap<PathId, usize>,
+    pub(crate) path_refs: FxHashMap<PathId, PathRefOwner>,
     /// Final path stats for discarded paths.
     ///
     /// We only insert entries if the discarded path has a non-zero reference count in [`Self::path_refs`].
-    /// When the last reference to a path is dropped via [`Self::decrement_path_refs`] its value is cleared.
+    /// When the last reference to a path is dropped its entry is removed from both maps.
     pub(crate) final_path_stats: FxHashMap<PathId, PathStats>,
     pub(crate) path_events: tokio::sync::broadcast::Sender<PathEvent>,
     sender: Pin<Box<dyn UdpSender>>,
@@ -1792,26 +1795,15 @@ impl State {
             .or_else(|| self.final_path_stats.get(&path_id).copied())
     }
 
-    /// Increment the reference counter for a path in this connection.
+    /// Acquire a new [`PathRef`] for a path id, bumping its reference counter by 1.
     ///
-    /// This counts how many [`Path`] or [`WeakPathHandle`] structs exist for a path.
-    /// Currently this is used to determine whether to store the final stats after a path is
-    /// abandoned.
+    /// The returned [`PathRef`] is intended to be stored on a [`Path`] or [`WeakPathHandle`].
+    /// Its reference count is automatically increased when cloned. When its owner is dropped,
+    /// [`PathRef::on_drop`] must be called to decrement the refcount.
     ///
     /// [`WeakPathHandle`]: crate::path::WeakPathHandle
-    pub(crate) fn increment_path_refs(&mut self, path_id: PathId) {
-        *self.path_refs.entry(path_id).or_default() += 1;
-    }
-
-    /// Decrement the reference counter for a path in this connection.
-    pub(crate) fn decrement_path_refs(&mut self, path_id: PathId) {
-        if let Some(refs) = self.path_refs.get_mut(&path_id) {
-            *refs = refs.saturating_sub(1);
-            if *refs == 0 {
-                self.path_refs.remove(&path_id);
-                self.final_path_stats.remove(&path_id);
-            }
-        }
+    pub(crate) fn acquire_path_ref(&mut self, path_id: PathId) -> PathRef {
+        self.path_refs.entry(path_id).or_default().acquire(path_id)
     }
 }
 
