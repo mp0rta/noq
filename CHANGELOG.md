@@ -2,7 +2,82 @@
 
 All notable changes to noq will be documented in this file.
 
-## [0.18.0](https://github.com/n0-computer/noq/compare/v0.17.0..0.18.0) - 2026-04-15
+## [1.0.0-rc.0](https://github.com/n0-computer/noq/compare/noq-v0.18.0..1.0.0-rc.0) - 2026-05-07
+
+### ⛰️  Features
+
+- *(noq)* [**breaking**] Return Closed struct from Connection::on_closed with path stats ([#617](https://github.com/n0-computer/noq/issues/617)) - ([3fc2e28](https://github.com/n0-computer/noq/commit/3fc2e28f9e82719a4a425aa33053b34e6842eca9))
+- *(proto)* Accept off-path probe packets ([#608](https://github.com/n0-computer/noq/issues/608)) - ([4a310f7](https://github.com/n0-computer/noq/commit/4a310f799c95f59f6540130cb82ee2eb3556397f))
+- *(proto)* Replace BBR with BBRv3 + breaking Controller API changes ([#611](https://github.com/n0-computer/noq/issues/611)) - ([0ac6b46](https://github.com/n0-computer/noq/commit/0ac6b4620b74c5fb66ef47928900608babe847c2))
+- *(proto)* Client-side off-path nat traversal ([#614](https://github.com/n0-computer/noq/issues/614)) - ([98e626f](https://github.com/n0-computer/noq/commit/98e626f6e0c42e7098b001d863b01323d954c27a))
+- *(proto)* [**breaking**] Set default max concurrent multipath paths to 8 (instead of 12) ([#620](https://github.com/n0-computer/noq/issues/620)) - ([a60749c](https://github.com/n0-computer/noq/commit/a60749cae702f40ff179cfc7889532b8103bb57c))
+- *(proto)* [**breaking**] Rename NAT traversal config and expose multipath default value ([#621](https://github.com/n0-computer/noq/issues/621)) - ([e25d7dd](https://github.com/n0-computer/noq/commit/e25d7dd60a277162680c1bc2d0fd0d6dc826a24b))
+- *(proto)* Send NAT probes with off-path PATH_RESPONSE ([#619](https://github.com/n0-computer/noq/issues/619)) - ([058aaab](https://github.com/n0-computer/noq/commit/058aaab5482887b4853b5092deec188fd7c14791))
+- *(proto)* Better NAT probe retry intervals ([#623](https://github.com/n0-computer/noq/issues/623)) - ([262697c](https://github.com/n0-computer/noq/commit/262697c65b4e1cc740cd1adc59f3b237211253dc))
+- *(quinn-udp)* Make Apple fast datapath opt-in - ([f52aa14](https://github.com/n0-computer/noq/commit/f52aa147c24a50ee565bca2e1b36e71640c5f380))
+- *(tests)* Add a router with NAT functionality to proto tests ([#596](https://github.com/n0-computer/noq/issues/596)) - ([b7e2317](https://github.com/n0-computer/noq/commit/b7e23177286f79197feac4769bf9a487a64bdb01))
+- Make negotiated_key_exchange_group always available ([#633](https://github.com/n0-computer/noq/issues/633)) - ([fe19376](https://github.com/n0-computer/noq/commit/fe19376f80022fd1880218cf7cbd5a712cab482f))
+
+### 🐛 Bug Fixes
+
+- *(noq-proto)* Do not recreate path state for already abandonend paths ([#631](https://github.com/n0-computer/noq/issues/631)) - ([8c353b8](https://github.com/n0-computer/noq/commit/8c353b86e0cc540e5d33a7af0c5a698eea4e3975))
+- *(perf)* Suppress table output in JSON mode - ([72400f3](https://github.com/n0-computer/noq/commit/72400f34da79ef32164809f2a6f167a5f5c07548))
+- *(proto)* Use approximate comparison for network paths ([#635](https://github.com/n0-computer/noq/issues/635)) - ([9e1f1ad](https://github.com/n0-computer/noq/commit/9e1f1ad77911fb0c8795d171c26d326c481dce3d))
+- *(qlog)* Emit RTT values in milliseconds ([#639](https://github.com/n0-computer/noq/issues/639)) - ([c904e92](https://github.com/n0-computer/noq/commit/c904e92eebf474be307ba10d52e24d9a48c4d00f))
+- *(unix)* Disable GSO after probing - ([bee7381](https://github.com/n0-computer/noq/commit/bee7381342e668228a43a726b28e3e9eb223224f))
+- Reuse existing socket for probing GRO/GSO support - ([db87183](https://github.com/n0-computer/noq/commit/db87183627ecca0c396f67c88856d79eba6f7188))
+- Remove opportunistic GRO syscall - ([dfa247c](https://github.com/n0-computer/noq/commit/dfa247c605de7b6fe4ed8afb797a196cfbdc068d))
+- Resolve `sendmsg_x`/`recvmsg_x` via `dlsym` - ([c435c08](https://github.com/n0-computer/noq/commit/c435c086e5420d6c1d115757127108f9ad24e131))
+- Gate perf Path import on json-output + restore deny.toml entries - ([79b20f4](https://github.com/n0-computer/noq/commit/79b20f445379515ff085bc8dc940a7118cd1e331))
+
+### 🚜 Refactor
+
+- *(noq)* Atomic path ref counts ([#626](https://github.com/n0-computer/noq/issues/626)) - ([c64cf98](https://github.com/n0-computer/noq/commit/c64cf9840071049463b9a0256d5f49fb87c7c2b7))
+- *(noq-proto)* [**breaking**] Get ring and aws_lc_rs out of public API ([#640](https://github.com/n0-computer/noq/issues/640)) - ([437d0c1](https://github.com/n0-computer/noq/commit/437d0c17b47564a1e419071130f9326b5d22a3ee))
+- *(proto)* Improve state of off-path nat probes ([#600](https://github.com/n0-computer/noq/issues/600)) - ([0c0e020](https://github.com/n0-computer/noq/commit/0c0e0205bb7c3d2ce4b83bd9f86c6f9e22036b66))
+- *(proto)* Raise limit of path responses kept around per `PathData` ([#622](https://github.com/n0-computer/noq/issues/622)) - ([a49f066](https://github.com/n0-computer/noq/commit/a49f0665b648202e085c2cc271426f5a55644350))
+- *(proto)* Introduce `CanonicalIpPort` to fix IP canonicalization issues ([#629](https://github.com/n0-computer/noq/issues/629)) - ([c711967](https://github.com/n0-computer/noq/commit/c7119679e60ad5a4f0beddb30d7117b267ee69d4))
+- *(proto)* Do not log as error ([#632](https://github.com/n0-computer/noq/issues/632)) - ([7ce9294](https://github.com/n0-computer/noq/commit/7ce929446cdb2d569fe975c735b9fb0bf625e895))
+- *(proto)* Remove some obsolete warnings ([#634](https://github.com/n0-computer/noq/issues/634)) - ([d5a09ef](https://github.com/n0-computer/noq/commit/d5a09efeec9833c349235acc28b01b14d8364508))
+- *(quinn-udp)* Extract `decode_socket_addr` helper - ([fe9e1e7](https://github.com/n0-computer/noq/commit/fe9e1e747b9489f6d2a264b072965447adbb41be))
+- *(quinn-udp)* Extract `ControlMetadata` helper - ([a22790d](https://github.com/n0-computer/noq/commit/a22790d34c090edb6022c03cb294650fefdbd172))
+- *(quinn-udp)* Split fast&slow send/recv paths - ([6127c0f](https://github.com/n0-computer/noq/commit/6127c0f022a8d4d35a222483c827f1170215a8b5))
+- *(quinn-udp)* Add `retry_if_interrupted` helper - ([609ddba](https://github.com/n0-computer/noq/commit/609ddba73c0ec298b20bec4b1c45157bf798998a))
+- Remove `gro` module - ([5ec5e64](https://github.com/n0-computer/noq/commit/5ec5e649c3e7e9874270f70fd6d168e1794baabe))
+- [**breaking**] Cleanup single path based expectations ([#616](https://github.com/n0-computer/noq/issues/616)) - ([fd36bc5](https://github.com/n0-computer/noq/commit/fd36bc5bf5f6779e744add3d2e6364e20e0af559))
+- [**breaking**] Return previous path status from Path::set_status ([#638](https://github.com/n0-computer/noq/issues/638)) - ([1facdd9](https://github.com/n0-computer/noq/commit/1facdd9a44bc06bc18d9d990f6b1838b3a02811a))
+- Rename write_chunk to write_bytes and write_chunks to write_bytes_many ([#536](https://github.com/n0-computer/noq/issues/536)) - ([f4ec777](https://github.com/n0-computer/noq/commit/f4ec7775afedb35b3c4a39228f424883ebe6c74a))
+- Rename read_chunk to read_bytes and make it return just a Bytes ([#535](https://github.com/n0-computer/noq/issues/535)) - ([a0f988a](https://github.com/n0-computer/noq/commit/a0f988a91db325be0a2ce7e65536016af881951b))
+
+### 📚 Documentation
+
+- *(quinn)* Improve `Connection::close_reason()` documentation - ([1fdd690](https://github.com/n0-computer/noq/commit/1fdd6904476cd46fd14bbe1cefdcd3f819ea048c))
+- Fix book build with mdbook 0.5.2 - ([bd83f7e](https://github.com/n0-computer/noq/commit/bd83f7e42f823455d5cbe0c5ff973431d0ac463c))
+- Clarify that `Event::ConnectionLost` is not emitted on local close - ([476c7bc](https://github.com/n0-computer/noq/commit/476c7bc61a222b83e83f288c6954bfe0f69cc1fd))
+
+### ⚙️ Miscellaneous Tasks
+
+- *(clippy)* Fix clippy and cargo-deny for new rust release ([#597](https://github.com/n0-computer/noq/issues/597)) - ([d64959b](https://github.com/n0-computer/noq/commit/d64959b87817dcfd3c934546cd6954639391ac03))
+- *(docs)* Improve docs of PacketNumberSpace vs PathData a little ([#598](https://github.com/n0-computer/noq/issues/598)) - ([c13d711](https://github.com/n0-computer/noq/commit/c13d711efb7f9e7d0a896ca00865fd0bf49ac1ab))
+- Run iroh's patchbay tests in CI ([#601](https://github.com/n0-computer/noq/issues/601)) - ([7d73657](https://github.com/n0-computer/noq/commit/7d736579d91135c86dca6b0074b54b339759d799))
+- Add semver check ([#605](https://github.com/n0-computer/noq/issues/605)) - ([2e1739d](https://github.com/n0-computer/noq/commit/2e1739d1e6eeeecdb5fff4556a9f598021e1cb0a))
+- Bump rustls-webpki to 0.103.13 (RUSTSEC-2026-0104) - ([93a2710](https://github.com/n0-computer/noq/commit/93a2710e74a8a13d673db3ac2dd8a0d076ed039e))
+- Clean up stale deny.toml entries (unused license/skips) - ([8a8119b](https://github.com/n0-computer/noq/commit/8a8119b4d9c2293baadb5d237e231efe7d57a7d7))
+- Sync with quinn@main ([#606](https://github.com/n0-computer/noq/issues/606)) - ([877dcca](https://github.com/n0-computer/noq/commit/877dcca064416b7d14701573833c4767ab468005))
+- Reexport all public noq-proto types at noq level ([#615](https://github.com/n0-computer/noq/issues/615)) - ([ecd08ae](https://github.com/n0-computer/noq/commit/ecd08ae5f53f00fdf559b8643281219c77e95aac))
+- Fail cargo-make flows for warnings ([#624](https://github.com/n0-computer/noq/issues/624)) - ([ee806ab](https://github.com/n0-computer/noq/commit/ee806ab69a7f31797788a2a26a4b214490b06a50))
+- Change deps to be more explicit - ([307adcd](https://github.com/n0-computer/noq/commit/307adcd7864fbde951928533216269418bc43e30))
+
+### Proto
+
+- Send STREAMS_BLOCKED when stream limit is hit   ([#2579](https://github.com/n0-computer/noq/issues/2579)) - ([cd3c8c7](https://github.com/n0-computer/noq/commit/cd3c8c7f2a57c08c85b806561cd2b9405819c5e1))
+
+### Quinn
+
+- Move ConnectionRef/EndpointRef ref counts onto Shared as AtomicUsize - ([c1d7ed2](https://github.com/n0-computer/noq/commit/c1d7ed2734beb44018799407bb0825259a934bb2))
+- Make Endpoint::server dual-stack V6 by default - ([ef2be07](https://github.com/n0-computer/noq/commit/ef2be0709d3c120a456f6bc467e8da860277e353))
+
+## [noq-v0.18.0](https://github.com/n0-computer/noq/compare/v0.17.0..noq-v0.18.0) - 2026-04-15
 
 ### ⛰️  Features
 
@@ -83,6 +158,7 @@ All notable changes to noq will be documented in this file.
 - Fix CID exhaustion check overflow on 32-bit targets ([#564](https://github.com/n0-computer/noq/issues/564)) - ([93f4216](https://github.com/n0-computer/noq/commit/93f421632b9bc61525e1d7559d51d40d77cc5149))
 - Add more cargo-make targets and update CI template ([#586](https://github.com/n0-computer/noq/issues/586)) - ([de242d8](https://github.com/n0-computer/noq/commit/de242d85f48178d411afa9160f101da30b2adef7))
 - Fix release config - ([bbcae8e](https://github.com/n0-computer/noq/commit/bbcae8e0ab0d7747b770ba4fd633589ba0173574))
+- Release - ([6933db9](https://github.com/n0-computer/noq/commit/6933db95b09db3f08318fdc642e00946cb6282a0))
 
 ### Bench
 
