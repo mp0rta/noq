@@ -156,25 +156,27 @@ impl RecvStream {
         .map(|res| res.map(|_| ()))
     }
 
-    /// Read the next segment of data
+    /// Reads the next segment of data as zero-copy [`Bytes`].
     ///
-    /// Yields `None` if the stream was finished. Otherwise, yields a segment of data and its
-    /// offset in the stream. The chunk's offset will be immediately after
-    /// the last data yielded by [`RecvStream::read`] or [`RecvStream::read_chunk`].
+    /// Yields `None` if the stream was finished. Otherwise, yields the next segment of data. The
+    /// chunk's offset will be immediately after the last data yielded by [`RecvStream::read`] or
+    /// [`RecvStream::read_chunk`]; use [`bytes_read()`](Self::bytes_read) to query that offset
+    /// explicitly.
     ///
     /// For unordered reads, convert the stream into an unordered stream using [`Self::into_unordered`].
     ///
-    /// Slightly more efficient than [`RecvStream::read`] due to not copying. Chunk boundaries do not correspond
-    /// to peer writes, and hence cannot be used as framing.
+    /// Slightly more efficient than [`RecvStream::read`] due to not copying. Chunk boundaries do
+    /// not correspond to peer writes, and hence cannot be used as framing.
     ///
     /// This operation is cancel-safe.
-    pub async fn read_chunk(&mut self, max_length: usize) -> Result<Option<Chunk>, ReadError> {
-        ReadChunk {
+    pub async fn read_chunk(&mut self, max_length: usize) -> Result<Option<Bytes>, ReadError> {
+        Ok(ReadChunk {
             stream: self,
             max_length,
             ordered: true,
         }
-        .await
+        .await?
+        .map(|chunk| chunk.bytes))
     }
 
     /// Attempts to read a chunk from the stream.
@@ -197,21 +199,24 @@ impl RecvStream {
         })
     }
 
-    /// Read the next segments of data
+    /// Reads the next segments of data.
     ///
-    /// Fills `bufs` with the segments of data beginning immediately after the
-    /// last data yielded by `read` or `read_chunk`, or `None` if the stream was
-    /// finished.
+    /// Fills `bufs` with the segments of data beginning immediately after the last data yielded
+    /// by [`read`](Self::read), [`read_chunk`](Self::read_chunk), or
+    /// [`read_many_chunks`](Self::read_many_chunks), or `None` if the stream was finished.
     ///
-    /// Slightly more efficient than `read` due to not copying. Chunk boundaries
-    /// do not correspond to peer writes, and hence cannot be used as framing.
+    /// Slightly more efficient than [`read`](Self::read) due to not copying. Chunk boundaries do
+    /// not correspond to peer writes, and hence cannot be used as framing.
     ///
     /// This operation is cancel-safe.
-    pub async fn read_chunks(&mut self, bufs: &mut [Bytes]) -> Result<Option<usize>, ReadError> {
+    pub async fn read_many_chunks(
+        &mut self,
+        bufs: &mut [Bytes],
+    ) -> Result<Option<usize>, ReadError> {
         ReadChunks { stream: self, bufs }.await
     }
 
-    /// Foundation of [`Self::read_chunks`]
+    /// Foundation of [`Self::read_many_chunks`]
     fn poll_read_chunks(
         &mut self,
         cx: &mut Context<'_>,
@@ -292,6 +297,15 @@ impl RecvStream {
     /// Get the identity of this stream
     pub fn id(&self) -> StreamId {
         self.stream
+    }
+
+    /// Returns the number of bytes read from this stream.
+    ///
+    /// This is the offset of the next byte to be read, i.e. the length of the contiguous
+    /// prefix of the stream consumed by the application.
+    pub fn bytes_read(&self) -> Result<u64, ClosedStream> {
+        let mut conn = self.conn.lock_without_waking("RecvStream::bytes_read");
+        conn.inner.recv_stream(self.stream).bytes_read()
     }
 
     /// Completes when the stream has been reset by the peer or otherwise closed
@@ -739,9 +753,10 @@ pub enum ReadExactError {
     ReadError(#[from] ReadError),
 }
 
-/// Future produced by [`RecvStream::read_chunk()`].
+/// Future produced by [`RecvStream::read_chunk()`] or [`UnorderedRecvStream::read_chunk()`].
 ///
 /// [`RecvStream::read_chunk()`]: crate::RecvStream::read_chunk
+/// [`UnorderedRecvStream::read_chunk()`]: crate::UnorderedRecvStream::read_chunk
 struct ReadChunk<'a> {
     stream: &'a mut RecvStream,
     max_length: usize,
@@ -756,9 +771,9 @@ impl Future for ReadChunk<'_> {
     }
 }
 
-/// Future produced by [`RecvStream::read_chunks()`].
+/// Future produced by [`RecvStream::read_many_chunks()`].
 ///
-/// [`RecvStream::read_chunks()`]: crate::RecvStream::read_chunks
+/// [`RecvStream::read_many_chunks()`]: crate::RecvStream::read_many_chunks
 struct ReadChunks<'a> {
     stream: &'a mut RecvStream,
     bufs: &'a mut [Bytes],
