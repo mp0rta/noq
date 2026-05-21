@@ -1789,3 +1789,60 @@ fn test_simple_nat_traversal_challenge_with_response() -> TestResult {
 
     Ok(())
 }
+
+/// If the client is not allowed to migrate, it should still be allowed to send NAT
+/// traversal probes and be able to hole-punch.
+#[test]
+fn test_peer_may_probe() -> TestResult {
+    let _guard = subscribe();
+
+    let mut cfg = TransportConfig::default();
+    cfg.max_concurrent_multipath_paths(MAX_PATHS);
+    cfg.mtu_discovery_config(None);
+    cfg.initial_rtt(Duration::from_millis(10));
+    #[cfg(feature = "qlog")]
+    cfg.qlog_from_env("multipath_test");
+    cfg.max_remote_nat_traversal_addresses(8);
+    let transport_cfg = Arc::new(cfg);
+
+    let server_cfg = ServerConfig {
+        transport: transport_cfg.clone(),
+        migration: false,
+        ..server_config()
+    };
+    let client_cfg = ClientConfig {
+        transport: transport_cfg,
+        ..client_config()
+    };
+
+    let mut pair = Pair::new(Default::default(), server_cfg);
+    pair.routes = SimpleFirewallRouting::new().into();
+
+    let mut pair = ConnPair::connect_with(pair, client_cfg);
+    pair.add_nat_traversal_address(Server, SimpleFirewallRouting::SERVER_FW_ADDR)?;
+    pair.add_nat_traversal_address(Client, SimpleFirewallRouting::CLIENT_FW_ADDR)?;
+    pair.drive();
+
+    let event = pair.poll(Client).expect("should have event");
+    assert_matches!(
+        event,
+        Event::NatTraversal(n0_nat_traversal::Event::AddressAdded(_))
+    );
+
+    info!("init NAT traversal");
+    pair.initiate_nat_traversal_round(Client)?;
+
+    // Ensure we have no more events queued
+    assert_matches!(pair.poll(Client), None);
+    assert_matches!(pair.poll(Server), None);
+
+    pair.drive();
+
+    let event = pair.poll(Client).expect("should have event");
+    assert_matches!(event, Event::Path(PathEvent::Established { .. }));
+
+    let event = pair.poll(Server).expect("should have event");
+    assert_matches!(event, Event::Path(PathEvent::Established { .. }));
+
+    Ok(())
+}
