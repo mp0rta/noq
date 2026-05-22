@@ -349,7 +349,7 @@ impl Connection {
             remote_cid_set: side.is_server(),
             expected_token: Bytes::new(),
             client_hello: None,
-            allow_server_migration: side.is_client(),
+            allow_server_migration: side.is_client() && config.server_handshake_migration,
         });
         let local_cid_state = FxHashMap::from_iter([(
             PathId::ZERO,
@@ -4629,7 +4629,7 @@ impl Connection {
                     expected_token: Bytes::new(),
                     remote_cid_set: false,
                     client_hello: None,
-                    allow_server_migration: true,
+                    allow_server_migration: self.config.server_handshake_migration,
                 });
                 Ok(())
             }

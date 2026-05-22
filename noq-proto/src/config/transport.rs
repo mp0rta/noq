@@ -67,6 +67,7 @@ pub struct TransportConfig {
     pub(crate) default_path_keep_alive_interval: Option<Duration>,
 
     pub(crate) max_remote_nat_traversal_addresses: Option<NonZeroU8>,
+    pub(crate) server_handshake_migration: bool,
 
     #[cfg(feature = "qlog")]
     pub(crate) qlog_factory: Option<Arc<dyn QlogFactory>>,
@@ -457,6 +458,25 @@ impl TransportConfig {
         self
     }
 
+    /// Sets whether the server is allowed to migrate once during the handshake.
+    ///
+    /// **Enabling this is not RFC9000 compliant.**
+    ///
+    /// Defaults to `false`.
+    ///
+    /// Enabling this allows the server to migrate once during the handshake: it can send a
+    /// response from a different address than the client's initial packet was sent to. Once
+    /// an authenticated Handshake packet is received the server can no longer migrate
+    /// during the handshake (or after the handshake if not other extension enables this).
+    ///
+    /// This can be used to duplicate the client's initial packet to multiple addresses for
+    /// the server and accept the fastest response. The server will discard all but the
+    /// first such initial, considering any remaining as duplicates.
+    pub fn server_handshake_migration(&mut self, allow_migration: bool) -> &mut Self {
+        self.server_handshake_migration = allow_migration;
+        self
+    }
+
     /// Configures qlog capturing by setting a [`QlogFactory`].
     ///
     /// This assigns a [`QlogFactory`] that produces qlog capture configurations for
@@ -572,6 +592,7 @@ impl Default for TransportConfig {
 
             // nat traversal disabled by default
             max_remote_nat_traversal_addresses: None,
+            server_handshake_migration: false,
 
             #[cfg(feature = "qlog")]
             qlog_factory: None,
@@ -613,6 +634,7 @@ impl fmt::Debug for TransportConfig {
             default_path_max_idle_timeout,
             default_path_keep_alive_interval,
             max_remote_nat_traversal_addresses,
+            server_handshake_migration,
             #[cfg(feature = "qlog")]
             qlog_factory,
         } = self;
@@ -664,7 +686,8 @@ impl fmt::Debug for TransportConfig {
             .field(
                 "max_remote_nat_traversal_addresses",
                 max_remote_nat_traversal_addresses,
-            );
+            )
+            .field("server_handshake_migration", server_handshake_migration);
         #[cfg(feature = "qlog")]
         s.field("qlog_factory", &qlog_factory.is_some());
 
