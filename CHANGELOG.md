@@ -2,7 +2,43 @@
 
 All notable changes to noq will be documented in this file.
 
-## [1.0.0-rc.0](https://github.com/n0-computer/noq/compare/noq-v0.18.0..1.0.0-rc.0) - 2026-05-07
+## [1.0.0-rc.1](https://github.com/n0-computer/noq/compare/noq-v1.0.0-rc.0..1.0.0-rc.1) - 2026-05-26
+
+### ⛰️  Features
+
+- *(proto)* Mark `PathEvent` as `#[non_exhaustive]` ([#648](https://github.com/n0-computer/noq/issues/648)) - ([be30bc5](https://github.com/n0-computer/noq/commit/be30bc5e2423475787974eb57d329ecb13566992))
+- *(proto)* [**breaking**] Make server handshake migration configurable - ([a303cfa](https://github.com/n0-computer/noq/commit/a303cfa60e24ed986e555e3899ab8b0466ef5630))
+- Add `Endpoint::wait_all_draining` to enable faster endpoint closing ([#651](https://github.com/n0-computer/noq/issues/651)) - ([269e5e0](https://github.com/n0-computer/noq/commit/269e5e0c38b62631d9a2f72ae236c6e3b91ad93d))
+
+### 🐛 Bug Fixes
+
+- *(migration)* Only trigger migration for remote changes ([#662](https://github.com/n0-computer/noq/issues/662)) - ([c37d285](https://github.com/n0-computer/noq/commit/c37d285f7dbc517a24867c3e243cf5b4f4da4672))
+- *(proto)* Don't probe server migrations from the client side but allow probing ([#663](https://github.com/n0-computer/noq/issues/663)) - ([6e56161](https://github.com/n0-computer/noq/commit/6e561616c46fd8eaa96523a49628ee83b883a9b9))
+- *(qnt)* Do not discard successful probes for unknown remotes ([#672](https://github.com/n0-computer/noq/issues/672)) - ([c20a684](https://github.com/n0-computer/noq/commit/c20a684349c2efb620f364a7d34df721ece489a5))
+
+### 🚜 Refactor
+
+- *(multipath)* [**breaking**] Rename PathEvent::Opened to Established ([#644](https://github.com/n0-computer/noq/issues/644)) - ([6a114f5](https://github.com/n0-computer/noq/commit/6a114f5a7f423ca9f48408afd068c3ecc952b546))
+- *(noq)* [**breaking**] Use FourTuple in open_path ([#661](https://github.com/n0-computer/noq/issues/661)) - ([8188014](https://github.com/n0-computer/noq/commit/8188014dbdb9586f8d963c56a52a5f1ee2f31630))
+- *(noq-proto)* [**breaking**] Remove unused PathAbandonReason::NatTraversalRoundEnded ([#652](https://github.com/n0-computer/noq/issues/652)) - ([e2130ab](https://github.com/n0-computer/noq/commit/e2130abf4e47e3a3566f5dad30a99954a8f0772d))
+- *(noq-proto)* [**breaking**] Remove identity_hash from public API ([#646](https://github.com/n0-computer/noq/issues/646)) - ([a635174](https://github.com/n0-computer/noq/commit/a635174133e35b80ec10025e307bdf8385b93c95))
+- *(tests)* Remove TestEndpoint::addr ([#666](https://github.com/n0-computer/noq/issues/666)) - ([abb7cbd](https://github.com/n0-computer/noq/commit/abb7cbdb7d7d8b0e65306482e1a0d01cdca24433))
+
+### ⚡ Performance
+
+- *(noq-proto)* Lazily allocate remote stream slots ([#667](https://github.com/n0-computer/noq/issues/667)) - ([4d29110](https://github.com/n0-computer/noq/commit/4d2911022514e9e9369a69d5704597d3e4182595))
+
+### 🧪 Testing
+
+- *(proto)* Make routing decision more versatile ([#658](https://github.com/n0-computer/noq/issues/658)) - ([132cd38](https://github.com/n0-computer/noq/commit/132cd3836704a2eec0f0ec08e6fedc8dcc27c979))
+- *(proto)* Always set a RoutingTable ([#659](https://github.com/n0-computer/noq/issues/659)) - ([7c17ca2](https://github.com/n0-computer/noq/commit/7c17ca2b9fbed155700687c9982952752ec37dba))
+
+### ⚙️ Miscellaneous Tasks
+
+- *(ci)* Switch to force-installing wasm-bindgen-cli ([#665](https://github.com/n0-computer/noq/issues/665)) - ([e701214](https://github.com/n0-computer/noq/commit/e7012143a52c1ed0ef2972e5d9c4661627fef97a))
+- Check external types in CI ([#643](https://github.com/n0-computer/noq/issues/643)) - ([684c3e2](https://github.com/n0-computer/noq/commit/684c3e25317f210ab20e159a49b0c93661990556))
+
+## [noq-v1.0.0-rc.0](https://github.com/n0-computer/noq/compare/noq-v0.18.0..noq-v1.0.0-rc.0) - 2026-05-07
 
 ### ⛰️  Features
 
@@ -67,6 +103,7 @@ All notable changes to noq will be documented in this file.
 - Reexport all public noq-proto types at noq level ([#615](https://github.com/n0-computer/noq/issues/615)) - ([ecd08ae](https://github.com/n0-computer/noq/commit/ecd08ae5f53f00fdf559b8643281219c77e95aac))
 - Fail cargo-make flows for warnings ([#624](https://github.com/n0-computer/noq/issues/624)) - ([ee806ab](https://github.com/n0-computer/noq/commit/ee806ab69a7f31797788a2a26a4b214490b06a50))
 - Change deps to be more explicit - ([307adcd](https://github.com/n0-computer/noq/commit/307adcd7864fbde951928533216269418bc43e30))
+- Release - ([6ee7cf2](https://github.com/n0-computer/noq/commit/6ee7cf2f8cbd17a941b8c639351ad9a09451cbc1))
 
 ### Proto
 
