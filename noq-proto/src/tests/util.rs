@@ -398,6 +398,7 @@ impl Default for ConnPair {
     }
 }
 
+#[allow(dead_code)]
 impl ConnPair {
     pub(super) fn connect_with(mut pair: Pair, client_cfg: ClientConfig) -> Self {
         let (client_ch, server_ch) = pair.connect_with(client_cfg);
@@ -1016,14 +1017,6 @@ impl TestEndpoint {
     }
 
     #[track_caller]
-    pub(super) fn assert_accept_error(&mut self) -> ConnectionError {
-        self.accepted
-            .take()
-            .expect("server didn't try connecting")
-            .expect_err("server did unexpectedly connect without error")
-    }
-
-    #[track_caller]
     pub(super) fn assert_no_accept(&self) {
         assert!(self.accepted.is_none(), "server did unexpectedly connect")
     }
@@ -1297,20 +1290,6 @@ impl Routing {
         match self {
             Self::Basic(inner) => inner,
             _ => panic!("cast to BasicRouting failed, a different routing table is set"),
-        }
-    }
-
-    pub(super) fn as_many_to_many(&self) -> &ManyToManyRouting {
-        match self {
-            Self::ManyToMany(inner) => inner,
-            _ => panic!("cast to ManyToManyRouting failed, a different routing table is set"),
-        }
-    }
-
-    pub(super) fn as_many_to_many_mut(&mut self) -> &mut ManyToManyRouting {
-        match self {
-            Self::ManyToMany(inner) => inner,
-            _ => panic!("cast to ManyToManyRouting failed, a different routing table is set"),
         }
     }
 }
