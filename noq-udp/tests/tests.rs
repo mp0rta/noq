@@ -127,7 +127,7 @@ fn ecn_v6_dualstack() {
         eprintln!("Skipping ECN test on Wine (ECN not supported)");
         return;
     }
-    let recv = socket2::Socket::new(
+    let recv = Socket::new(
         socket2::Domain::IPV6,
         socket2::Type::DGRAM,
         Some(socket2::Protocol::UDP),
@@ -177,7 +177,7 @@ fn ecn_v4_mapped_v6() {
         eprintln!("Skipping ECN test on Wine (ECN not supported)");
         return;
     }
-    let send = socket2::Socket::new(
+    let send = Socket::new(
         socket2::Domain::IPV6,
         socket2::Type::DGRAM,
         Some(socket2::Protocol::UDP),
@@ -253,13 +253,13 @@ fn socket_buffers() {
         1 // Everyone else is sane.
     };
 
-    let send = socket2::Socket::new(
+    let send = Socket::new(
         socket2::Domain::IPV4,
         socket2::Type::DGRAM,
         Some(socket2::Protocol::UDP),
     )
     .unwrap();
-    let recv = socket2::Socket::new(
+    let recv = Socket::new(
         socket2::Domain::IPV4,
         socket2::Type::DGRAM,
         Some(socket2::Protocol::UDP),

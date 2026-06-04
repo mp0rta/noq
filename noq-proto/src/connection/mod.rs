@@ -711,7 +711,7 @@ impl Connection {
 
         self.abandoned_paths.insert(path_id);
 
-        for timer in timer::PathTimer::VALUES {
+        for timer in PathTimer::VALUES {
             // match for completeness
             let keep_timer = match timer {
                 // These timers deal with sending and receiving PATH_CHALLENGE and
@@ -864,7 +864,7 @@ impl Connection {
             .paths
             .get_mut(&path_id)
             .ok_or(ClosedPath { _private: () })?;
-        let prev = std::mem::replace(&mut path.data.idle_timeout, timeout);
+        let prev = mem::replace(&mut path.data.idle_timeout, timeout);
 
         // Adjust the PathIdle timer, accounting for already-elapsed idle time.
         if !self.state.is_closed() {
@@ -903,7 +903,7 @@ impl Connection {
             .paths
             .get_mut(&path_id)
             .ok_or(ClosedPath { _private: () })?;
-        Ok(std::mem::replace(&mut path.data.keep_alive, interval))
+        Ok(mem::replace(&mut path.data.keep_alive, interval))
     }
 
     /// Find an open, validated path that's on the same network path as the given network path.
@@ -1550,7 +1550,7 @@ impl Connection {
                     // Clamp the datagram to at most the minimum MTU to ensure that loss
                     // probes can get through and enable recovery even if the path MTU
                     // has shrank unexpectedly.
-                    transmit.start_new_datagram_with_size(std::cmp::min(
+                    transmit.start_new_datagram_with_size(cmp::min(
                         usize::from(INITIAL_MTU),
                         transmit.segment_size(),
                     ));
@@ -6289,8 +6289,7 @@ impl Connection {
             && space_id == SpaceId::Data
             && path.pending.observed_address
         {
-            let frame =
-                frame::ObservedAddr::new(path.network_path.remote, self.next_observed_addr_seq_no);
+            let frame = ObservedAddr::new(path.network_path.remote, self.next_observed_addr_seq_no);
             if builder.frame_space_remaining() > frame.size() {
                 builder.write_frame(frame, stats);
 
@@ -7216,7 +7215,7 @@ impl AbandonedPaths {
 }
 
 /// Hints when the caller identifies a network change.
-pub trait NetworkChangeHint: std::fmt::Debug + 'static {
+pub trait NetworkChangeHint: fmt::Debug + 'static {
     /// Inform the connection if a path may recover after a network change.
     ///
     /// After network changes, paths may not be recoverable. In this case, waiting for the path to

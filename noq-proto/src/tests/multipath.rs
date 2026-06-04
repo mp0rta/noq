@@ -52,7 +52,7 @@ fn non_zero_length_cids() {
             0
         }
 
-        fn cid_lifetime(&self) -> Option<std::time::Duration> {
+        fn cid_lifetime(&self) -> Option<Duration> {
             None
         }
     }
@@ -76,7 +76,7 @@ fn non_zero_length_cids() {
         .expect_err("server did not raise error for connection");
     match accept_err {
         crate::ConnectionError::TransportError(error) => {
-            assert_eq!(error.code, crate::TransportErrorCode::PROTOCOL_VIOLATION);
+            assert_eq!(error.code, TransportErrorCode::PROTOCOL_VIOLATION);
         }
         _ => panic!("Not a TransportError"),
     }
@@ -142,7 +142,7 @@ fn path_close_last_path() {
 #[test]
 fn cid_issued_multipath() {
     let _guard = subscribe();
-    const ACTIVE_CID_LIMIT: u64 = crate::cid_queue::CidQueue::LEN as _;
+    const ACTIVE_CID_LIMIT: u64 = CidQueue::LEN as _;
     let mut pair = ConnPair::builder().enable_multipath().connect();
 
     let client_stats = pair.stats(Client);
@@ -374,12 +374,12 @@ fn open_path() -> TestResult {
     pair.drive();
     assert_matches!(
         pair.poll(Client),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
 
     assert_matches!(
         pair.poll(Server),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
     Ok(())
 }
@@ -402,12 +402,12 @@ fn open_path_key_update() -> TestResult {
     pair.drive();
     assert_matches!(
         pair.poll(Client),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
 
     assert_matches!(
         pair.poll(Server),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
     Ok(())
 }
@@ -844,11 +844,11 @@ fn mtud_on_two_paths() -> TestResult {
     // Ensure the path opened correctly.
     assert_matches!(
         pair.poll(Client),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
     assert_matches!(
         pair.poll(Server),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
 
     // MTU should be 1200 for both paths.
@@ -2124,11 +2124,11 @@ fn path_open_challenge_lost() -> TestResult {
     pair.drive();
     assert_matches!(
         pair.poll(Client),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
     assert_matches!(
         pair.poll(Server),
-        Some(Event::Path(crate::PathEvent::Established { id  })) if id == path_id
+        Some(Event::Path(PathEvent::Established { id  })) if id == path_id
     );
     Ok(())
 }

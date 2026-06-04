@@ -125,7 +125,7 @@ impl<K, V, const SIZE: usize> Default for SmallMap<K, V, SIZE> {
 
 impl<K, V, const SIZE: usize> SmallMap<K, V, SIZE>
 where
-    K: std::cmp::Eq + std::hash::Hash + IdentityHashable,
+    K: Eq + std::hash::Hash + IdentityHashable,
 {
     fn insert(&mut self, key: K, value: V) -> Option<V> {
         // check stack for space

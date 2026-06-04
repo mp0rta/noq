@@ -749,7 +749,7 @@ impl PendingNewCids {
 
     /// Pops the next issued CID to transmit from the queue.
     pub(super) fn pop(&mut self) -> Option<IssuedCid> {
-        if !std::mem::replace(&mut self.sorted, true) {
+        if !mem::replace(&mut self.sorted, true) {
             self.cids
                 .sort_by_key(|cid| cmp::Reverse((cid.path_id, cid.sequence)));
         }
@@ -1004,7 +1004,7 @@ impl Dedup {
 type Window = u128;
 
 /// Number of packets tracked by `Dedup`.
-const WINDOW_SIZE: u64 = 1 + mem::size_of::<Window>() as u64 * 8;
+const WINDOW_SIZE: u64 = 1 + size_of::<Window>() as u64 * 8;
 /// Indicates which data is available for sending
 ///
 /// This applies to a particular space ID that was queried and all refers to on-path data.
@@ -1574,7 +1574,7 @@ mod test {
     fn sent_packet_size() {
         // The tracking state of sent packets should be minimal, and not grow
         // over time.
-        assert!(std::mem::size_of::<SentPacket>() <= 128);
+        assert!(size_of::<SentPacket>() <= 128);
     }
 
     #[test]

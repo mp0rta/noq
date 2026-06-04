@@ -523,7 +523,7 @@ impl QlogRecvPacket {
     pub(crate) fn frame(&mut self, frame: &Frame) {
         #[cfg(feature = "qlog")]
         {
-            if matches!(frame, crate::Frame::Padding) {
+            if matches!(frame, Frame::Padding) {
                 self.padding += 1;
             } else {
                 self.emit_padding();
@@ -728,7 +728,7 @@ impl ToQlog for frame::MaxStreams {
 }
 
 #[cfg(feature = "qlog")]
-impl ToQlog for frame::StreamsBlocked {
+impl ToQlog for StreamsBlocked {
     fn to_qlog(&self) -> QuicFrame {
         QuicFrame::StreamsBlocked {
             stream_type: self.dir.into(),

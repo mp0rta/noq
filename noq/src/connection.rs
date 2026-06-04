@@ -1863,7 +1863,7 @@ impl Drop for State {
             // Ensure the endpoint can tidy up
             let _ = self
                 .endpoint_events
-                .send((self.handle, proto::EndpointEvent::drained()));
+                .send((self.handle, EndpointEvent::drained()));
         }
 
         if !self.on_closed.is_empty()

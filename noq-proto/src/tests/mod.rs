@@ -4533,7 +4533,7 @@ fn throughput() -> TestResult {
         .with_routes(BwLimitedRouting::new(
             Pair::CLIENT_ADDR,
             Pair::SERVER_ADDR,
-            crate::Instant::now(),
+            Instant::now(),
             BwLimitConfig {
                 bytes_per_second: BPS_LIMIT,
                 buffer_size: 50 * 1500, // buffer that fits ~50 full packets
@@ -4593,7 +4593,7 @@ fn send_bytes(mut send_stream: crate::SendStream<'_>, bytes_to_send: &mut usize)
             Ok(written) => {
                 *bytes_to_send -= written;
             }
-            Err(crate::WriteError::Blocked) => return Ok(()),
+            Err(WriteError::Blocked) => return Ok(()),
             Err(e) => panic!("{e:?}"),
         }
     }
@@ -4602,14 +4602,14 @@ fn send_bytes(mut send_stream: crate::SendStream<'_>, bytes_to_send: &mut usize)
             Ok(written) => {
                 *bytes_to_send -= written;
             }
-            Err(crate::WriteError::Blocked) => return Ok(()),
+            Err(WriteError::Blocked) => return Ok(()),
             Err(e) => panic!("{e:?}"),
         }
     }
     Ok(())
 }
 
-fn recv_bytes(mut recv_stream: crate::RecvStream<'_>, bytes_received: &mut usize) {
+fn recv_bytes(mut recv_stream: RecvStream<'_>, bytes_received: &mut usize) {
     let Ok(mut chunks) = recv_stream.read(true) else {
         return;
     };

@@ -91,8 +91,7 @@ impl State {
                             if close.error_code == TransportErrorCode::PROTOCOL_VIOLATION {
                                 ConnectionError::TransportError(TransportError::new(
                                     close.error_code,
-                                    std::string::String::from_utf8_lossy(&close.reason[..])
-                                        .to_string(),
+                                    String::from_utf8_lossy(&close.reason[..]).to_string(),
                                 ))
                             } else {
                                 ConnectionError::ConnectionClosed(close)

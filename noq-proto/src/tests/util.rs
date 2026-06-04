@@ -1177,7 +1177,7 @@ impl InboundQueue {
 
     /// Drains all packets, yielding each with its `recv_time`.
     pub(super) fn drain(&mut self) -> impl Iterator<Item = (Instant, Inbound)> {
-        std::mem::take(&mut self.inner)
+        mem::take(&mut self.inner)
             .into_iter()
             .map(|((t, _), v)| (t, v))
     }
