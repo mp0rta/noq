@@ -45,6 +45,9 @@ mod cmsg;
 #[path = "unix.rs"]
 mod imp;
 
+#[cfg(all(any(target_os = "linux", target_os = "android"), not(posix_minimal)))]
+mod linux;
+
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod imp;
