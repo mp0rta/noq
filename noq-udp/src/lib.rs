@@ -38,18 +38,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(apple_fast)]
-mod apple_fast;
-
 #[cfg(any(all(unix, not(posix_minimal)), windows))]
 mod cmsg;
 
 #[cfg(all(unix, not(posix_minimal)))]
 #[path = "unix.rs"]
 mod imp;
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-mod linux;
 
 #[cfg(windows)]
 #[path = "windows.rs"]

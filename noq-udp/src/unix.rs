@@ -19,12 +19,7 @@ use super::{
     EcnCodepoint, IO_ERROR_LOG_INTERVAL, RecvMeta, Transmit, UdpSockRef, cmsg, log_sendmsg_error,
 };
 
-#[cfg(apple_fast)]
-use super::apple_fast::{msghdr_x, recv_via_recvmsg_x, send};
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use super::linux::gso;
-
-/// Tokio-compatible UDP socket with some useful specializations
+/// Tokio-compatible UDP socket with some useful specializations.
 ///
 /// Unlike a standard tokio UDP socket, this allows ECN bits to be read and written on some
 /// platforms.
@@ -187,7 +182,7 @@ impl UdpSocketState {
         })
     }
 
-    /// Sends a [`Transmit`] on the given socket
+    /// Sends a [`Transmit`] on the given socket.
     ///
     /// This function will only ever return errors of kind [`io::ErrorKind::WouldBlock`].
     /// All other errors will be logged and converted to `Ok`.
@@ -213,7 +208,7 @@ impl UdpSocketState {
         }
     }
 
-    /// Sends a [`Transmit`] on the given socket without any additional error handling
+    /// Sends a [`Transmit`] on the given socket without any additional error handling.
     pub fn try_send(&self, socket: UdpSockRef<'_>, transmit: &Transmit<'_>) -> io::Result<()> {
         send(self, socket.0, transmit)
     }
@@ -322,7 +317,7 @@ impl UdpSocketState {
     }
 
     /// Returns true if we previously got an EINVAL error from `sendmsg` syscall.
-    pub(crate) fn sendmsg_einval(&self) -> bool {
+    fn sendmsg_einval(&self) -> bool {
         self.sendmsg_einval.load(Ordering::Relaxed)
     }
 
@@ -332,7 +327,7 @@ impl UdpSocketState {
         self.sendmsg_einval.store(true, Ordering::Relaxed)
     }
 
-    /// Enables Apple's fast UDP datapath using private `sendmsg_x`/`recvmsg_x` APIs
+    /// Enables Apple's fast UDP datapath using private `sendmsg_x`/`recvmsg_x` APIs.
     ///
     /// Once enabled, this also updates [`max_gso_segments`] to allow batched sends.
     ///
@@ -348,13 +343,13 @@ impl UdpSocketState {
         self.max_gso_segments.store(BATCH_SIZE, Ordering::Relaxed);
     }
 
-    /// Returns whether Apple's fast UDP datapath is enabled for this socket
+    /// Returns whether Apple's fast UDP datapath is enabled for this socket.
     #[cfg(apple_fast)]
     pub fn is_apple_fast_path_enabled(&self) -> bool {
         self.apple_fast_path.load(Ordering::Relaxed)
     }
 
-    /// Disables Apple's fast UDP datapath, reverting to `sendmsg`/`recvmsg`
+    /// Disables Apple's fast UDP datapath, reverting to `sendmsg`/`recvmsg`.
     #[cfg(apple_fast)]
     fn disable_apple_fast_path(&self) {
         self.apple_fast_path.store(false, Ordering::Relaxed);
@@ -366,7 +361,7 @@ impl UdpSocketState {
     /// Disables the fast path if the symbol is absent so that future calls use the slow path
     /// directly.
     #[cfg(apple_fast)]
-    pub(crate) fn resolve_apple_fast_fn<T>(&self, resolver: fn() -> Option<T>) -> Option<T> {
+    fn resolve_apple_fast_fn<T>(&self, resolver: fn() -> Option<T>) -> Option<T> {
         let f = resolver();
         if f.is_none() {
             self.disable_apple_fast_path();
@@ -460,6 +455,60 @@ fn send(
     }
 }
 
+#[cfg(apple_fast)]
+fn send(state: &UdpSocketState, io: SockRef<'_>, transmit: &Transmit<'_>) -> io::Result<()> {
+    if state.is_apple_fast_path_enabled() {
+        send_via_sendmsg_x(state, io, transmit)
+    } else {
+        send_single(state, io, transmit)
+    }
+}
+
+/// Send using the fast `sendmsg_x` API.
+#[cfg(apple_fast)]
+fn send_via_sendmsg_x(
+    state: &UdpSocketState,
+    io: SockRef<'_>,
+    transmit: &Transmit<'_>,
+) -> io::Result<()> {
+    let mut hdrs = unsafe { mem::zeroed::<[msghdr_x; BATCH_SIZE]>() };
+    let mut iovs = unsafe { mem::zeroed::<[libc::iovec; BATCH_SIZE]>() };
+    let mut ctrls = [cmsg::Aligned([0u8; cmsg::LEN]); BATCH_SIZE];
+    let addr = socket2::SockAddr::from(transmit.destination);
+    let segment_size = transmit.segment_size.unwrap_or(transmit.contents.len());
+    let mut cnt = 0;
+    debug_assert!(transmit.contents.len().div_ceil(segment_size) <= BATCH_SIZE);
+    for (i, chunk) in transmit
+        .contents
+        .chunks(segment_size)
+        .enumerate()
+        .take(BATCH_SIZE)
+    {
+        prepare_msg_x(
+            &Transmit {
+                destination: transmit.destination,
+                ecn: transmit.ecn,
+                contents: chunk,
+                segment_size: Some(chunk.len()),
+                src_ip: transmit.src_ip,
+            },
+            &addr,
+            &mut hdrs[i],
+            &mut iovs[i],
+            &mut ctrls[i],
+            true,
+            state.sendmsg_einval(),
+        );
+        hdrs[i].msg_datalen = chunk.len();
+        cnt += 1;
+    }
+    let Some(sendmsg_x) = state.resolve_apple_fast_fn(sendmsg_x_fn) else {
+        return send_single(state, io, transmit);
+    };
+    retry_if_interrupted(|| unsafe { sendmsg_x(io.as_raw_fd(), hdrs.as_ptr(), cnt as u32, 0) })?;
+    Ok(())
+}
+
 #[cfg(any(target_os = "openbsd", target_os = "netbsd", apple_slow))]
 fn send(state: &UdpSocketState, io: SockRef<'_>, transmit: &Transmit<'_>) -> io::Result<()> {
     send_single(state, io, transmit)
@@ -467,11 +516,7 @@ fn send(state: &UdpSocketState, io: SockRef<'_>, transmit: &Transmit<'_>) -> io:
 
 #[cfg(any(target_os = "openbsd", target_os = "netbsd", apple))]
 #[cfg_attr(apple_fast, allow(dead_code))] // Unused when apple_fast is enabled
-pub(crate) fn send_single(
-    state: &UdpSocketState,
-    io: SockRef<'_>,
-    transmit: &Transmit<'_>,
-) -> io::Result<()> {
+fn send_single(state: &UdpSocketState, io: SockRef<'_>, transmit: &Transmit<'_>) -> io::Result<()> {
     let mut hdr: libc::msghdr = unsafe { mem::zeroed() };
     let mut iov: libc::iovec = unsafe { mem::zeroed() };
     let mut ctrl = cmsg::Aligned([0u8; cmsg::LEN]);
@@ -489,7 +534,7 @@ pub(crate) fn send_single(
     Ok(())
 }
 
-/// Receive using the batched `recvmmsg` syscall
+/// Receive using the batched `recvmmsg` syscall.
 #[cfg(not(any(
     apple,
     target_os = "openbsd",
@@ -530,6 +575,80 @@ fn recv_via_recvmmsg(
     Ok(msg_count as usize)
 }
 
+/// Receive using the fast `recvmsg_x` API.
+#[cfg(apple_fast)]
+fn recv_via_recvmsg_x(
+    state: &UdpSocketState,
+    io: SockRef<'_>,
+    bufs: &mut [IoSliceMut<'_>],
+    meta: &mut [RecvMeta],
+) -> io::Result<usize> {
+    let mut names = [MaybeUninit::<libc::sockaddr_storage>::uninit(); BATCH_SIZE];
+    // MacOS 10.15 `recvmsg_x` does not override the `msghdr_x`
+    // `msg_controllen`. Thus, after the call to `recvmsg_x`, one does not know
+    // which control messages have been written to. To prevent reading
+    // uninitialized memory, do not use `MaybeUninit` for `ctrls`, instead
+    // initialize `ctrls` with `0`s. A control message of all `0`s is
+    // automatically skipped by `libc::CMSG_NXTHDR`.
+    let mut ctrls = [cmsg::Aligned([0u8; cmsg::LEN]); BATCH_SIZE];
+    let mut hdrs = unsafe { mem::zeroed::<[msghdr_x; BATCH_SIZE]>() };
+    let max_msg_count = bufs.len().min(BATCH_SIZE);
+    for i in 0..max_msg_count {
+        prepare_recv_x(&mut bufs[i], &mut names[i], &mut ctrls[i], &mut hdrs[i]);
+    }
+    let Some(recvmsg_x) = state.resolve_apple_fast_fn(recvmsg_x_fn) else {
+        return recv_single(io, bufs, meta);
+    };
+    let msg_count = retry_if_interrupted(|| unsafe {
+        recvmsg_x(io.as_raw_fd(), hdrs.as_mut_ptr(), max_msg_count as _, 0)
+    })?;
+    for i in 0..(msg_count as usize) {
+        meta[i] = decode_recv(&names[i], &hdrs[i], hdrs[i].msg_datalen as usize)?;
+    }
+    Ok(msg_count as usize)
+}
+
+/// Returns the `sendmsg_x` function pointer, resolving it via `dlsym` on first call.
+///
+/// Returns `None` if the symbol is not available on the current OS version.
+#[cfg(apple_fast)]
+fn sendmsg_x_fn() -> Option<SendmsgXFn> {
+    static ADDR: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    // SAFETY: `resolve_symbol` only returns non-zero addresses obtained from `dlsym`, which
+    // guarantees a callable symbol whose type matches the declaration above.
+    resolve_symbol(&ADDR, c"sendmsg_x")
+        .map(|addr| unsafe { std::mem::transmute::<usize, SendmsgXFn>(addr) })
+}
+
+/// Returns the `recvmsg_x` function pointer, resolving it via `dlsym` on first call.
+///
+/// Returns `None` if the symbol is not available on the current OS version.
+#[cfg(apple_fast)]
+fn recvmsg_x_fn() -> Option<RecvmsgXFn> {
+    static ADDR: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    // SAFETY: `resolve_symbol` only returns non-zero addresses obtained from `dlsym`, which
+    // guarantees a callable symbol whose type matches the declaration above.
+    resolve_symbol(&ADDR, c"recvmsg_x")
+        .map(|addr| unsafe { std::mem::transmute::<usize, RecvmsgXFn>(addr) })
+}
+
+#[cfg(apple_fast)]
+type SendmsgXFn =
+    unsafe extern "C" fn(libc::c_int, *const msghdr_x, libc::c_uint, libc::c_int) -> isize;
+#[cfg(apple_fast)]
+type RecvmsgXFn =
+    unsafe extern "C" fn(libc::c_int, *mut msghdr_x, libc::c_uint, libc::c_int) -> isize;
+
+/// Resolves a symbol via `dlsym` on first call, caching the result.
+///
+/// Returns `None` if the symbol is not available on the current OS version.
+#[cfg(apple_fast)]
+fn resolve_symbol(lock: &std::sync::OnceLock<usize>, name: &std::ffi::CStr) -> Option<usize> {
+    let addr =
+        *lock.get_or_init(|| unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) as usize });
+    (addr != 0).then_some(addr)
+}
+
 #[cfg(any(
     target_os = "openbsd",
     target_os = "netbsd",
@@ -539,7 +658,7 @@ fn recv_via_recvmmsg(
     apple
 ))]
 #[cfg_attr(apple_fast, allow(dead_code))] // Unused when apple_fast is enabled
-pub(crate) fn recv_single(
+fn recv_single(
     io: SockRef<'_>,
     bufs: &mut [IoSliceMut<'_>],
     meta: &mut [RecvMeta],
@@ -665,6 +784,66 @@ fn prepare_msg(
     encoder.finish();
 }
 
+/// Prepares an `msghdr_x` for use with `sendmsg_x`.
+#[cfg(apple_fast)]
+fn prepare_msg_x(
+    transmit: &Transmit<'_>,
+    dst_addr: &socket2::SockAddr,
+    hdr: &mut msghdr_x,
+    iov: &mut libc::iovec,
+    ctrl: &mut cmsg::Aligned<[u8; cmsg::LEN]>,
+    #[allow(unused_variables)] encode_src_ip: bool,
+    sendmsg_einval: bool,
+) {
+    iov.iov_base = transmit.contents.as_ptr() as *const _ as *mut _;
+    iov.iov_len = transmit.contents.len();
+
+    let name = dst_addr.as_ptr() as *mut libc::c_void;
+    let namelen = dst_addr.len();
+    hdr.msg_name = name as *mut _;
+    hdr.msg_namelen = namelen;
+    hdr.msg_iov = iov;
+    hdr.msg_iovlen = 1;
+
+    hdr.msg_control = ctrl.0.as_mut_ptr() as _;
+    hdr.msg_controllen = cmsg::LEN as _;
+    let mut encoder = unsafe { cmsg::Encoder::new(hdr) };
+    let ecn = transmit.ecn.map_or(0, |x| x as libc::c_int);
+    let is_ipv4 = transmit.destination.is_ipv4()
+        || matches!(transmit.destination.ip(), IpAddr::V6(addr) if addr.to_ipv4_mapped().is_some());
+    if is_ipv4 {
+        if !sendmsg_einval {
+            encoder.push(libc::IPPROTO_IP, libc::IP_TOS, ecn as IpTosTy);
+        }
+    } else {
+        encoder.push(libc::IPPROTO_IPV6, libc::IPV6_TCLASS, ecn);
+    }
+
+    if let Some(ip) = &transmit.src_ip {
+        match ip {
+            IpAddr::V4(v4) => {
+                if encode_src_ip {
+                    let addr = libc::in_addr {
+                        s_addr: u32::from_ne_bytes(v4.octets()),
+                    };
+                    encoder.push(libc::IPPROTO_IP, libc::IP_RECVDSTADDR, addr);
+                }
+            }
+            IpAddr::V6(v6) => {
+                let pktinfo = libc::in6_pktinfo {
+                    ipi6_ifindex: 0,
+                    ipi6_addr: libc::in6_addr {
+                        s6_addr: v6.octets(),
+                    },
+                };
+                encoder.push(libc::IPPROTO_IPV6, libc::IPV6_PKTINFO, pktinfo);
+            }
+        }
+    }
+
+    encoder.finish();
+}
+
 #[cfg_attr(apple_fast, allow(dead_code))] // Unused when apple_fast is enabled
 fn prepare_recv(
     buf: &mut IoSliceMut<'_>,
@@ -681,7 +860,25 @@ fn prepare_recv(
     hdr.msg_flags = 0;
 }
 
-pub(crate) fn decode_recv<M: cmsg::MsgHdr<ControlMessage = libc::cmsghdr>>(
+/// Prepares an `msghdr_x` for receiving with `recvmsg_x`.
+#[cfg(apple_fast)]
+fn prepare_recv_x(
+    buf: &mut IoSliceMut<'_>,
+    name: &mut MaybeUninit<libc::sockaddr_storage>,
+    ctrl: &mut cmsg::Aligned<[u8; cmsg::LEN]>,
+    hdr: &mut msghdr_x,
+) {
+    hdr.msg_name = name.as_mut_ptr() as _;
+    hdr.msg_namelen = mem::size_of::<libc::sockaddr_storage>() as _;
+    hdr.msg_iov = buf as *mut IoSliceMut<'_> as *mut libc::iovec;
+    hdr.msg_iovlen = 1;
+    hdr.msg_control = ctrl.0.as_mut_ptr() as _;
+    hdr.msg_controllen = cmsg::LEN as _;
+    hdr.msg_flags = 0;
+    hdr.msg_datalen = buf.len();
+}
+
+fn decode_recv<M: cmsg::MsgHdr<ControlMessage = libc::cmsghdr>>(
     name: &MaybeUninit<libc::sockaddr_storage>,
     hdr: &M,
     len: usize,
@@ -779,7 +976,7 @@ impl ControlMetadata {
 }
 
 /// Decodes a `sockaddr_storage` into a `SocketAddr`
-pub(crate) fn decode_socket_addr(name: &libc::sockaddr_storage) -> io::Result<SocketAddr> {
+fn decode_socket_addr(name: &libc::sockaddr_storage) -> io::Result<SocketAddr> {
     match libc::c_int::from(name.ss_family) {
         libc::AF_INET => {
             // Safety: if the ss_family field is AF_INET then storage must be a sockaddr_in.
@@ -814,6 +1011,168 @@ pub(crate) const BATCH_SIZE: usize = 32;
 #[cfg(apple_slow)]
 pub(crate) const BATCH_SIZE: usize = 1;
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod gso {
+    use super::*;
+    use std::{ffi::CStr, mem, str::FromStr, sync::OnceLock};
+
+    // Support for UDP GSO has been added to linux kernel in version 4.18
+    // https://github.com/torvalds/linux/commit/cb586c63e3fc5b227c51fd8c4cb40b34d3750645
+    const SUPPORTED_SINCE: KernelVersion = KernelVersion {
+        version: 4,
+        major_revision: 18,
+    };
+
+    /// Checks whether GSO support is available.
+    ///
+    /// Checks the kernel version followed by setting the UDP_SEGMENT option on a socket.
+    pub(crate) fn max_gso_segments(socket: &impl AsRawFd) -> usize {
+        const GSO_SIZE: libc::c_int = 1500;
+
+        if !SUPPORTED_BY_CURRENT_KERNEL.get_or_init(supported_by_current_kernel) {
+            return 1;
+        }
+
+        // As defined in linux/udp.h
+        // #define UDP_MAX_SEGMENTS        (1 << 6UL)
+        match set_socket_option(socket, libc::SOL_UDP, libc::UDP_SEGMENT, GSO_SIZE) {
+            Ok(()) => {
+                // Disable GSO again globally to ensure we can selectively enable it via cmsg.
+                // See:
+                // - https://github.com/quinn-rs/quinn/issues/2575
+                // - https://man7.org/linux/man-pages/man7/udp.7.html
+                let _ = set_socket_option(socket, libc::SOL_UDP, libc::UDP_SEGMENT, 0);
+
+                64
+            }
+            Err(_e) => {
+                crate::log::debug!(
+                    "failed to set `UDP_SEGMENT` socket option ({_e}); setting `max_gso_segments = 1`"
+                );
+
+                1
+            }
+        }
+    }
+
+    pub(crate) fn set_segment_size(
+        encoder: &mut cmsg::Encoder<'_, libc::msghdr>,
+        segment_size: u16,
+    ) {
+        encoder.push(libc::SOL_UDP, libc::UDP_SEGMENT, segment_size);
+    }
+
+    // Avoid calling `supported_by_current_kernel` for each socket by using `OnceLock`.
+    static SUPPORTED_BY_CURRENT_KERNEL: OnceLock<bool> = OnceLock::new();
+
+    fn supported_by_current_kernel() -> bool {
+        let kernel_version_string = match kernel_version_string() {
+            Ok(kernel_version_string) => kernel_version_string,
+            Err(_e) => {
+                crate::log::warn!("GSO disabled: uname returned {_e}");
+                return false;
+            }
+        };
+
+        let Some(kernel_version) = KernelVersion::from_str(&kernel_version_string) else {
+            crate::log::warn!(
+                "GSO disabled: failed to parse kernel version ({kernel_version_string})"
+            );
+            return false;
+        };
+
+        if kernel_version < SUPPORTED_SINCE {
+            crate::log::info!("GSO disabled: kernel too old ({kernel_version_string}); need 4.18+",);
+            return false;
+        }
+
+        true
+    }
+
+    fn kernel_version_string() -> io::Result<String> {
+        let mut n = unsafe { mem::zeroed() };
+        let r = unsafe { libc::uname(&mut n) };
+        if r != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe {
+            CStr::from_ptr(n.release[..].as_ptr())
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
+
+    // https://www.linfo.org/kernel_version_numbering.html
+    #[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
+    struct KernelVersion {
+        version: u8,
+        major_revision: u8,
+    }
+
+    impl KernelVersion {
+        fn from_str(release: &str) -> Option<Self> {
+            let mut split = release
+                .split_once('-')
+                .map(|pair| pair.0)
+                .unwrap_or(release)
+                .split('.');
+
+            let version = u8::from_str(split.next()?).ok()?;
+            let major_revision = u8::from_str(split.next()?).ok()?;
+
+            Some(Self {
+                version,
+                major_revision,
+            })
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn parse_current_kernel_version_release_string() {
+            let release = kernel_version_string().unwrap();
+            KernelVersion::from_str(&release).unwrap();
+        }
+
+        #[test]
+        fn parse_kernel_version_release_string() {
+            // These are made up for the test
+            assert_eq!(
+                KernelVersion::from_str("4.14"),
+                Some(KernelVersion {
+                    version: 4,
+                    major_revision: 14
+                })
+            );
+            assert_eq!(
+                KernelVersion::from_str("4.18"),
+                Some(KernelVersion {
+                    version: 4,
+                    major_revision: 18
+                })
+            );
+            // These were seen in the wild
+            assert_eq!(
+                KernelVersion::from_str("4.14.186-27095505"),
+                Some(KernelVersion {
+                    version: 4,
+                    major_revision: 14
+                })
+            );
+            assert_eq!(
+                KernelVersion::from_str("6.8.0-59-generic"),
+                Some(KernelVersion {
+                    version: 6,
+                    major_revision: 8
+                })
+            );
+        }
+    }
+}
+
 // On Apple platforms using the `sendmsg_x` call, UDP datagram segmentation is not
 // offloaded to the NIC or even the kernel, but instead done here in user space in
 // [`send`]) and then passed to the OS as individual `iovec`s (up to `BATCH_SIZE`).
@@ -836,10 +1195,25 @@ mod gso {
     }
 }
 
+// Adapted from https://github.com/apple-oss-distributions/xnu/blob/8d741a5de7ff4191bf97d57b9f54c2f6d4a15585/bsd/sys/socket_private.h
+#[cfg(apple_fast)]
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub(crate) struct msghdr_x {
+    pub msg_name: *mut libc::c_void,
+    pub msg_namelen: libc::socklen_t,
+    pub msg_iov: *mut libc::iovec,
+    pub msg_iovlen: libc::c_int,
+    pub msg_control: *mut libc::c_void,
+    pub msg_controllen: libc::socklen_t,
+    pub msg_flags: libc::c_int,
+    pub msg_datalen: usize,
+}
+
 #[cfg(target_os = "freebsd")]
 type IpTosTy = libc::c_uchar;
 #[cfg(not(any(target_os = "freebsd", target_os = "netbsd")))]
-pub(crate) type IpTosTy = libc::c_int;
+type IpTosTy = libc::c_int;
 
 /// Returns whether the given socket option is supported on the current platform
 ///
@@ -859,7 +1233,7 @@ fn set_socket_option_supported(
     }
 }
 
-pub(crate) fn set_socket_option(
+fn set_socket_option(
     socket: &impl AsRawFd,
     level: libc::c_int,
     name: libc::c_int,
@@ -886,7 +1260,7 @@ const OPTION_ON: libc::c_int = 1;
 /// Calls `f` in a loop, retrying on `EINTR`.
 ///
 /// Returns the non-negative result or the first non-`EINTR` error.
-pub(crate) fn retry_if_interrupted(mut f: impl FnMut() -> isize) -> io::Result<isize> {
+fn retry_if_interrupted(mut f: impl FnMut() -> isize) -> io::Result<isize> {
     loop {
         let n = f();
         if n >= 0 {
