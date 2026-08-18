@@ -115,6 +115,10 @@ cfg_aliases = { workspace = true }
 workspace = true
 
 [[example]]
+name = "multipath"
+required-features = ["rustls", "ring"]
+
+[[example]]
 name = "server"
 required-features = ["rustls", "ring"]
 
