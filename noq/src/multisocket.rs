@@ -24,7 +24,8 @@ use crate::{AsyncUdpSocket, Runtime, UdpSender};
 #[derive(Debug, Clone)]
 pub enum SocketPin {
     /// Bind to the wildcard address and pin egress with `SO_BINDTODEVICE`.
-    /// Requires `CAP_NET_RAW` (typically root). Linux/Android only.
+    /// Requires `CAP_NET_RAW` (typically root). Linux/Android only, and
+    /// currently IPv4-only (the member binds an IPv4 wildcard socket).
     Iface(String),
     /// Bind to this specific local IP (ephemeral port). No special privileges.
     Ip(IpAddr),
@@ -57,17 +58,37 @@ impl MultiSocket {
             ));
         }
         let mut inner = Vec::with_capacity(specs.len());
-        let mut locals = Vec::with_capacity(specs.len());
+        let mut locals: Vec<Option<IpAddr>> = Vec::with_capacity(specs.len());
         for (pin, local) in specs {
+            let local = match (pin, local) {
+                (SocketPin::Ip(ip), None) => Some(*ip),
+                (_, local) => *local,
+            };
+            // Dispatch is keyed on the local IP: an interface member without
+            // a resolved IP could never be selected, and duplicate IPs would
+            // silently shadow each other (first match wins).
+            if matches!(pin, SocketPin::Iface(_)) && local.is_none() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "SocketPin::Iface members need a resolved local IP for transmit dispatch",
+                ));
+            }
+            if let Some(ip) = local
+                && locals
+                    .iter()
+                    .any(|l| l.map(|prev| prev.to_canonical()) == Some(ip.to_canonical()))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("duplicate local IP {ip} across member sockets"),
+                ));
+            }
             let socket = match pin {
                 SocketPin::Iface(name) => bind_to_device(name)?,
                 SocketPin::Ip(ip) => UdpSocket::bind((*ip, 0))?,
             };
             inner.push(runtime.wrap_udp_socket(socket)?);
-            locals.push(match (pin, local) {
-                (SocketPin::Ip(ip), None) => Some(*ip),
-                (_, local) => *local,
-            });
+            locals.push(local);
         }
         Ok(Self { inner, locals })
     }
@@ -88,13 +109,17 @@ fn bind_to_device(_name: &str) -> io::Result<UdpSocket> {
     ))
 }
 
-/// Picks the member socket for a transmit: an exact source-IP match wins;
-/// no source IP or no match falls back to the primary (index 0).
+/// Picks the member socket for a transmit: an exact source-IP match wins
+/// (compared in canonical form, so IPv4-mapped IPv6 addresses match their
+/// IPv4 members); no source IP or no match falls back to the primary
+/// (index 0).
 fn pick_socket(src_ip: Option<IpAddr>, locals: &[Option<IpAddr>]) -> usize {
-    if let Some(src) = src_ip {
-        if let Some(i) = locals.iter().position(|l| *l == Some(src)) {
-            return i;
-        }
+    if let Some(src) = src_ip
+        && let Some(i) = locals
+            .iter()
+            .position(|l| l.map(|ip| ip.to_canonical()) == Some(src.to_canonical()))
+    {
+        return i;
     }
     0
 }
@@ -163,7 +188,9 @@ impl UdpSender for MultiSender {
             // but with multipath a downed interface (ENETDOWN/ENODEV) is
             // exactly the condition the surviving paths should ride out.
             // Drop the datagram and let loss recovery / path failover
-            // handle it.
+            // handle it. Trade-off: a *persistently* broken member (e.g.
+            // EBADF) degrades into per-path idle timeouts instead of a
+            // fail-fast connection error.
             Poll::Ready(Err(e)) => {
                 tracing::warn!("multisocket: send on socket {idx} failed: {e} (datagram dropped)");
                 Poll::Ready(Ok(()))
@@ -201,6 +228,18 @@ mod tests {
             Some("10.20.0.1".parse().unwrap()),
         ];
         assert_eq!(pick_socket(None, &locals), 0);
+    }
+
+    #[test]
+    fn v4_mapped_v6_src_matches_v4_member() {
+        let locals = [
+            Some("10.10.0.1".parse().unwrap()),
+            Some("10.20.0.1".parse().unwrap()),
+        ];
+        assert_eq!(
+            pick_socket(Some("::ffff:10.20.0.1".parse().unwrap()), &locals),
+            1
+        );
     }
 
     #[test]

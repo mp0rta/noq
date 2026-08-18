@@ -47,7 +47,7 @@ rustls-log = ["rustls?/logging"]
 # Enable qlog support
 qlog = ["proto/qlog"]
 # Bundle several per-interface UDP sockets behind one AsyncUdpSocket (multipath)
-multisocket = []
+multisocket = ["socket2/all"]
 # Use private Apple APIs to send multiple packets in a single syscall.
 fast-apple-datapath = ["udp/fast-apple-datapath"]
 
@@ -59,7 +59,7 @@ rustls-aws-lc-rs = ["rustls", "aws-lc-rs"]
 # Don't rely on these whatsoever. They may disappear at any time.
 
 __rustls-post-quantum-test =  ["rustls/prefer-post-quantum", "rustls", "aws-lc-rs", "proto/__rustls-post-quantum-test"]
-__all_without_fips = ["lock_tracking", "aws-lc-rs", "rustls", "ring", "runtime-tokio", "runtime-smol", "tracing-log", "rustls-log", "bloom", "platform-verifier", "qlog", "fast-apple-datapath"]
+__all_without_fips = ["lock_tracking", "aws-lc-rs", "rustls", "ring", "runtime-tokio", "runtime-smol", "tracing-log", "rustls-log", "bloom", "platform-verifier", "qlog", "fast-apple-datapath", "multisocket"]
 
 [dependencies]
 async-io = { workspace = true, optional = true }

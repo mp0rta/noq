@@ -233,7 +233,7 @@ async fn run_client(
         }
     };
     println!(
-        "second path established: id={:?} 4tuple={:?}",
+        "[client] second path established: id={:?} 4tuple={:?}",
         path.id(),
         path.network_path()
     );
@@ -255,10 +255,10 @@ async fn run_client(
 
 fn resolve_iface_ipv4(name: &str) -> Result<IpAddr, DynError> {
     for iface in if_addrs::get_if_addrs()? {
-        if iface.name == name {
-            if let ip @ IpAddr::V4(_) = iface.ip() {
-                return Ok(ip);
-            }
+        if iface.name == name
+            && let ip @ IpAddr::V4(_) = iface.ip()
+        {
+            return Ok(ip);
         }
     }
     Err(format!("interface '{name}' has no IPv4 address").into())
