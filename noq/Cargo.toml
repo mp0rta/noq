@@ -46,6 +46,8 @@ tracing-log = ["tracing/log", "proto/tracing-log", "udp/tracing-log"]
 rustls-log = ["rustls?/logging"]
 # Enable qlog support
 qlog = ["proto/qlog"]
+# Bundle several per-interface UDP sockets behind one AsyncUdpSocket (multipath)
+multisocket = []
 # Use private Apple APIs to send multiple packets in a single syscall.
 fast-apple-datapath = ["udp/fast-apple-datapath"]
 
@@ -107,6 +109,7 @@ tracing-futures = { workspace = true }
 url = { workspace = true }
 tokio-stream = "0.1.15"
 testresult = "0.4.1"
+if-addrs = "0.13"
 
 [build-dependencies]
 cfg_aliases = { workspace = true }
@@ -116,7 +119,7 @@ workspace = true
 
 [[example]]
 name = "multipath"
-required-features = ["rustls", "ring"]
+required-features = ["rustls", "ring", "multisocket"]
 
 [[example]]
 name = "server"

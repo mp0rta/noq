@@ -46,6 +46,8 @@ mod connection;
 mod endpoint;
 mod event_stream;
 mod incoming;
+#[cfg(all(feature = "multisocket", not(wasm_browser)))]
+mod multisocket;
 mod mutex;
 mod path;
 mod recv_stream;
@@ -84,6 +86,8 @@ pub use crate::connection::{
 pub use crate::endpoint::{Accept, Endpoint, EndpointStats};
 pub use crate::event_stream::{Lagged, NatTraversalUpdates, ObservedExternalAddr, PathEvents};
 pub use crate::incoming::{Incoming, IncomingFuture, RetryError};
+#[cfg(all(feature = "multisocket", not(wasm_browser)))]
+pub use crate::multisocket::{MultiSocket, SocketPin};
 pub use crate::path::{AddressDiscovery, OpenPath, Path, WeakPathHandle};
 pub use crate::recv_stream::{
     ReadError, ReadExactError, ReadToEndError, RecvStream, ResetError, UnorderedRecvStream,

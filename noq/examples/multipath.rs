@@ -1,16 +1,21 @@
 //! Two-path multipath demo over real UDP sockets.
 //!
-//! server: cargo run --example multipath -- server 0.0.0.0:4433
-//! client: cargo run --example multipath -- client <server_addr> \
-//!             --local-ip <ip_a> --local-ip <ip_b> [--remote2 <addr>] [--hold <secs>]
+//! server: cargo run --example multipath --features multisocket -- server 0.0.0.0:4433
+//! client (single wildcard socket, per-packet source selection):
+//!     cargo run --example multipath --features multisocket -- client <server_addr> \
+//!         --local-ip <ip_a> --local-ip <ip_b> [--remote2 <addr>] [--hold <secs>]
+//! client (one socket per NIC via MultiSocket + SO_BINDTODEVICE, needs root):
+//!     cargo run --example multipath --features multisocket -- client <server_addr> \
+//!         --ifaces <nic_a>,<nic_b> [--remote2 <addr>] [--hold <secs>]
 //!
-//! The client connects via the default route (first path), then opens a
-//! second path from the last --local-ip (to --remote2 if given, else the
-//! same server addr). Both sides print path events.
+//! The client connects via the first socket/default route (primary path),
+//! then opens a second path from the last --local-ip (or the last --ifaces
+//! member's address) to --remote2 if given, else the same server addr.
+//! Both sides print path events.
 //!
-//! Note: the first --local-ip is informational only. The primary path's local
-//! address is chosen by kernel routing (the socket is wildcard-bound); do not
-//! try to bind it.
+//! Note: in --local-ip mode the first --local-ip is informational only. The
+//! primary path's local address is chosen by kernel routing (the socket is
+//! wildcard-bound); do not try to bind it.
 
 use std::{
     error::Error,
@@ -21,8 +26,8 @@ use std::{
 };
 
 use noq::{
-    ClientConfig, Connection, Endpoint, FourTuple, PathError, PathStatus, ServerConfig,
-    TransportConfig,
+    ClientConfig, Connection, Endpoint, EndpointConfig, FourTuple, MultiSocket, PathError,
+    PathStatus, ServerConfig, SocketPin, TransportConfig,
 };
 use proto::crypto::rustls::QuicClientConfig;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
@@ -30,7 +35,7 @@ use tokio_stream::StreamExt;
 
 type DynError = Box<dyn Error + Send + Sync + 'static>;
 
-const USAGE: &str = "usage: multipath server <bind_addr>\n       multipath client <server_addr> --local-ip <ip> [--local-ip <ip>] [--remote2 <addr>] [--hold <secs>]";
+const USAGE: &str = "usage: multipath server <bind_addr>\n       multipath client <server_addr> --local-ip <ip> [--local-ip <ip>] [--remote2 <addr>] [--hold <secs>]\n       multipath client <server_addr> --ifaces <nic_a>,<nic_b> [--remote2 <addr>] [--hold <secs>]";
 
 #[tokio::main]
 async fn main() -> Result<(), DynError> {
@@ -43,6 +48,7 @@ async fn main() -> Result<(), DynError> {
         Some("client") => {
             let server_addr: SocketAddr = args.get(1).ok_or(USAGE)?.parse()?;
             let mut local_ips: Vec<IpAddr> = Vec::new();
+            let mut ifaces: Vec<String> = Vec::new();
             let mut remote2: Option<SocketAddr> = None;
             let mut hold_secs = 60u64;
             let mut i = 2;
@@ -50,6 +56,15 @@ async fn main() -> Result<(), DynError> {
                 match args[i].as_str() {
                     "--local-ip" => {
                         local_ips.push(args.get(i + 1).ok_or(USAGE)?.parse()?);
+                        i += 2;
+                    }
+                    "--ifaces" => {
+                        ifaces = args
+                            .get(i + 1)
+                            .ok_or(USAGE)?
+                            .split(',')
+                            .map(str::to_string)
+                            .collect();
                         i += 2;
                     }
                     "--remote2" => {
@@ -63,7 +78,7 @@ async fn main() -> Result<(), DynError> {
                     other => return Err(format!("unknown arg {other}\n{USAGE}").into()),
                 }
             }
-            run_client(server_addr, local_ips, remote2, hold_secs).await
+            run_client(server_addr, local_ips, ifaces, remote2, hold_secs).await
         }
         _ => Err(USAGE.into()),
     }
@@ -149,11 +164,36 @@ async fn echo_loop(conn: Connection) {
 async fn run_client(
     server_addr: SocketAddr,
     local_ips: Vec<IpAddr>,
+    ifaces: Vec<String>,
     remote2: Option<SocketAddr>,
     hold_secs: u64,
 ) -> Result<(), DynError> {
-    // Wildcard bind: per-path source IPs are selected per packet (IP_PKTINFO).
-    let endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
+    let (endpoint, second_local) = if ifaces.is_empty() {
+        // Wildcard bind: per-path source IPs are selected per packet (IP_PKTINFO).
+        let endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
+        let second_local = *local_ips.last().ok_or("need --local-ip or --ifaces")?;
+        (endpoint, second_local)
+    } else {
+        // One socket per NIC, pinned with SO_BINDTODEVICE, bundled by MultiSocket.
+        let mut specs = Vec::new();
+        let mut resolved = Vec::new();
+        for name in &ifaces {
+            let ip = resolve_iface_ipv4(name)?;
+            println!("[client] iface {name} -> {ip}");
+            specs.push((SocketPin::Iface(name.clone()), Some(ip)));
+            resolved.push(ip);
+        }
+        let runtime = noq::default_runtime().ok_or("no async runtime found")?;
+        let multisocket = MultiSocket::bind(&specs, &runtime)?;
+        let endpoint = Endpoint::new_with_abstract_socket(
+            EndpointConfig::default(),
+            None,
+            Box::new(multisocket),
+            runtime,
+        )?;
+        let second_local = *resolved.last().ok_or("need at least one iface")?;
+        (endpoint, second_local)
+    };
     let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(
         rustls::ClientConfig::builder()
             .dangerous()
@@ -177,7 +217,6 @@ async fn run_client(
     echo_once(&conn, b"hello over the primary path").await?;
     println!("[client] primary path echo OK");
 
-    let second_local = *local_ips.last().ok_or("need at least one --local-ip")?;
     let second_remote = remote2.unwrap_or(server_addr);
     let tuple = FourTuple::new(second_remote, Some(second_local));
     // Right after the handshake the peer may not have issued enough CIDs for
@@ -212,6 +251,17 @@ async fn run_client(
     conn.close(0u32.into(), b"done");
     endpoint.wait_idle().await;
     Ok(())
+}
+
+fn resolve_iface_ipv4(name: &str) -> Result<IpAddr, DynError> {
+    for iface in if_addrs::get_if_addrs()? {
+        if iface.name == name {
+            if let ip @ IpAddr::V4(_) = iface.ip() {
+                return Ok(ip);
+            }
+        }
+    }
+    Err(format!("interface '{name}' has no IPv4 address").into())
 }
 
 async fn echo_once(conn: &Connection, msg: &[u8]) -> Result<(), DynError> {
