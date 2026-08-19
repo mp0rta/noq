@@ -3796,7 +3796,9 @@ impl Connection {
             .is_probably_same_path(remote);
 
         self.total_authed_packets += 1;
-        self.reset_keep_alive(path_id, now);
+        // Only the connection-level keep-alive is receive-driven. The
+        // per-path keep-alive must not be reset here: see reset_keep_alive.
+        self.reset_conn_keep_alive(now);
         self.reset_idle_timeout(now, space_id, path_id);
         self.path_data_mut(path_id).permit_idle_reset = true;
 
@@ -3882,8 +3884,8 @@ impl Connection {
         self.rearm_path_max_idle_timer(now, space, path_id);
     }
 
-    /// Resets both the [`ConnTimer::KeepAlive`] and [`PathTimer::PathKeepAlive`] timers
-    fn reset_keep_alive(&mut self, path_id: PathId, now: Instant) {
+    /// Resets the connection-level [`ConnTimer::KeepAlive`] timer.
+    fn reset_conn_keep_alive(&mut self, now: Instant) {
         if !self.state.is_established() {
             return;
         }
@@ -3894,6 +3896,24 @@ impl Connection {
                 now + interval,
                 self.qlog.with_time(now),
             );
+        }
+    }
+
+    /// Resets the [`ConnTimer::KeepAlive`] and [`PathTimer::PathKeepAlive`] timers.
+    ///
+    /// Called when a packet is sent on `path_id`. The per-path keep-alive is
+    /// deliberately driven by send inactivity only: its purpose is to feed the
+    /// peer's per-path idle timer, and the acknowledgements for this path's
+    /// packets may travel on a different path. If received packets also reset
+    /// it, the peer's regular keep-alives can perpetually suppress ours, the
+    /// path carries no traffic in our direction, and the peer's idle timer
+    /// (fed only by what we send on the path) expires — abandoning a healthy
+    /// path.
+    fn reset_keep_alive(&mut self, path_id: PathId, now: Instant) {
+        self.reset_conn_keep_alive(now);
+
+        if !self.state.is_established() {
+            return;
         }
 
         if let Some(interval) = self.path_data(path_id).keep_alive {

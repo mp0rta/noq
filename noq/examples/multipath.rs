@@ -90,6 +90,8 @@ async fn main() -> Result<(), DynError> {
 /// within a few seconds for the failover experiment.
 fn transport_config() -> TransportConfig {
     let mut tc = TransportConfig::default();
+    #[cfg(feature = "qlog")]
+    tc.qlog_from_env("noq-mp");
     tc.max_concurrent_multipath_paths(3);
     tc.default_path_keep_alive_interval(Some(Duration::from_secs(1)));
     tc.default_path_max_idle_timeout(Some(Duration::from_secs(3)));
