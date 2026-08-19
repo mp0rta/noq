@@ -1730,6 +1730,86 @@ fn nat_traversal_revalidates_existing_path() -> TestResult {
     Ok(())
 }
 
+/// A second path with keep-alives configured on both sides must survive an
+/// arbitrarily long period without application traffic.
+///
+/// Regression test: the per-path keep-alive used to be reset by received
+/// packets too, so one side's keep-alives could perpetually suppress the
+/// other side's (each arriving PING pushed the receiver's own keep-alive
+/// forward). The path then carried no traffic in one direction and the
+/// starved side's per-path idle timeout abandoned a perfectly healthy path.
+#[test]
+fn idle_path_survives_on_keepalive() -> TestResult {
+    let _guard = subscribe();
+    let mut builder = ConnPair::builder().enable_multipath();
+    // Slightly asymmetric keep-alive intervals pin down the pathological
+    // phase deterministically: with receive-driven keep-alives the client's
+    // (faster) pings always arrive before the server's own keep-alive
+    // expires, perpetually suppressing it. The asymmetry is load-bearing:
+    // with equal intervals the lock-step test harness does not reproduce
+    // the suppression and the test would pass even with the bug present.
+    const CLIENT_KEEP_ALIVE: Duration = Duration::from_millis(900);
+    const SERVER_KEEP_ALIVE: Duration = Duration::from_millis(1000);
+    assert!(
+        CLIENT_KEEP_ALIVE < SERVER_KEEP_ALIVE,
+        "asymmetry is load-bearing"
+    );
+    builder
+        .client_transport_cfg
+        .default_path_keep_alive_interval(Some(CLIENT_KEEP_ALIVE));
+    builder
+        .server_transport_cfg
+        .default_path_keep_alive_interval(Some(SERVER_KEEP_ALIVE));
+    for cfg in [
+        &mut builder.server_transport_cfg,
+        &mut builder.client_transport_cfg,
+    ] {
+        cfg.default_path_max_idle_timeout(Some(Duration::from_secs(3)));
+    }
+    let mut pair = builder.connect();
+
+    let server_addr = pair.routes.public_server_addr();
+    let path_id = pair.open_path(
+        Client,
+        FourTuple::from_remote(server_addr),
+        PathStatus::Available,
+    )?;
+    pair.drive_bounded(50);
+    assert_matches!(
+        pair.poll(Client),
+        Some(Event::Path(PathEvent::Established { id })) if id == path_id
+    );
+    assert_matches!(
+        pair.poll(Server),
+        Some(Event::Path(PathEvent::Established { id })) if id == path_id
+    );
+
+    // No application traffic at all: only the keep-alives feed the paths.
+    let start = pair.time;
+    let mut iterations = 0;
+    while pair.time - start < Duration::from_secs(12) {
+        if !pair.step() {
+            // Both endpoints are idle: jump to the next timer deadline
+            // (the keep-alive / idle timers are the only thing pending).
+            assert!(
+                pair.advance_time(),
+                "no pending timers while keep-alives are configured"
+            );
+        }
+        iterations += 1;
+        assert!(iterations < 5000, "test did not advance");
+        for side in [Client, Server] {
+            while let Some(event) = pair.poll(side) {
+                assert!(
+                    !matches!(event, Event::Path(PathEvent::Abandoned { .. })),
+                    "path abandoned during a keep-alive-only period: {event:?}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// After a silent gap, PTO backs off exponentially and can reach minutes.
 /// The 2s PTO cap ensures recovery happens promptly once connectivity returns.
 #[test]
