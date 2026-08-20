@@ -2373,3 +2373,97 @@ fn regression_discarded_path_stats_are_up_to_date() -> TestResult {
 
     Ok(())
 }
+
+/// In-flight data on a path that dies to a local network change is
+/// retransmitted on the surviving path immediately.
+///
+/// Regression test: in-flight packets of an abandoned path used to be
+/// declared lost only when the path was discarded, 3*PTO after PATH_ABANDON
+/// was queued. On a fully-ordered stream that stalls delivery long after the
+/// failure is already known, and the stall scales with the dead path's RTT
+/// estimate. With the network change as the abandon reason the path is known
+/// dead locally, so the loss declaration must not wait for the drain timer.
+#[test]
+fn network_change_retransmits_in_flight_immediately() -> TestResult {
+    let _guard = subscribe();
+    // Real latency so the drain period (3*PTO, RTT-derived: >= 300ms here) is
+    // much larger than the immediate-retransmission budget asserted below.
+    const LATENCY: Duration = Duration::from_millis(40);
+    let mut pair = ConnPair::builder()
+        .with_latency(LATENCY)
+        .enable_multipath()
+        .connect();
+
+    let server_addr = pair.routes.public_server_addr();
+    let second_path = pair.open_path(
+        Client,
+        FourTuple::from_remote(server_addr),
+        PathStatus::Available,
+    )?;
+    pair.drive();
+    assert_matches!(
+        pair.poll(Client),
+        Some(Event::Path(PathEvent::Established { id })) if id == second_path
+    );
+    assert_matches!(
+        pair.poll(Server),
+        Some(Event::Path(PathEvent::Established { id })) if id == second_path
+    );
+
+    // A single-packet message: sent exactly once, on the lowest available
+    // path (PathId::ZERO).
+    let s = pair.streams(Client).open(Dir::Uni).unwrap();
+    const MSG: &[u8] = b"survives the failover";
+    pair.send_stream(Client, s).write(MSG).unwrap();
+    pair.send_stream(Client, s).finish().unwrap();
+
+    // Flush it into the void: everything the client sends is dropped,
+    // simulating the primary interface dying with the data in flight.
+    for _ in 0..3 {
+        pair.blackhole_step(true, false);
+    }
+    assert_matches!(pair.streams(Server).accept(Dir::Uni), None);
+
+    // The local network stack reports the primary path's interface as gone.
+    #[derive(Debug)]
+    struct PrimaryDown;
+    impl NetworkChangeHint for PrimaryDown {
+        fn is_path_recoverable(&self, path_id: PathId, _network_path: FourTuple) -> bool {
+            path_id != PathId::ZERO
+        }
+    }
+    let failed_at = pair.time;
+    pair.handle_network_change(Client, Some(&PrimaryDown));
+
+    // Step (each step only advances to the next timer) until the message
+    // lands on the server, WITHOUT driving to full idleness: full idleness
+    // would also wait out the replacement path's validation and hide when
+    // the data actually arrived.
+    let mut accepted = None;
+    for _ in 0..50 {
+        pair.step();
+        if let Some(stream) = pair.streams(Server).accept(Dir::Uni) {
+            accepted = Some(stream);
+            break;
+        }
+    }
+    let elapsed = pair.time - failed_at;
+    assert_matches!(accepted, Some(stream) if stream == s);
+    // One immediate retransmission on the surviving path: transit latency
+    // plus ack bookkeeping, well under the old drain-timer delay.
+    assert!(
+        elapsed < Duration::from_millis(150),
+        "in-flight data stalled for {elapsed:?} after the network change \
+         (the abandoned path's drain timer must not gate retransmission)",
+    );
+
+    let mut recv = pair.recv_stream(Server, s);
+    let mut chunks = recv.read(false).unwrap();
+    assert_matches!(
+        chunks.next(usize::MAX),
+        Ok(Some(chunk)) if chunk.bytes == MSG
+    );
+    let _ = chunks.finalize();
+
+    Ok(())
+}

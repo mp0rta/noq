@@ -670,6 +670,26 @@ impl Connection {
     fn abandon_path(&mut self, now: Instant, path_id: PathId, reason: PathAbandonReason) {
         trace!(%path_id, ?reason, "abandoning path");
 
+        // Mark the path abandoned before anything below runs: the loss
+        // declaration right after must not have this path counted as live
+        // while it processes the mass loss (e.g. `current_mtu()` filters
+        // abandoned paths; a black-hole verdict on the dying path must not
+        // shrink the datagram size limit surviving paths could carry).
+        self.abandoned_paths.insert(path_id);
+
+        // A path abandoned because the local network says it is gone can no
+        // longer deliver or acknowledge anything: declare its in-flight
+        // packets lost right away so their stream data is retransmitted on
+        // the remaining paths immediately, instead of stalling behind the
+        // 3*PTO drain timer (whose duration scales with this path's RTT
+        // estimate). If a late cross-path PATH_ACK still covers some of this
+        // data, the spurious retransmission is harmless. This runs before the
+        // pending-frame cleanup below so any per-path frames it re-queues for
+        // the abandoned path are swept by that same cleanup.
+        if matches!(reason, PathAbandonReason::UnusableAfterNetworkChange) {
+            self.declare_path_packets_lost(path_id, now);
+        }
+
         let pending_space = &mut self.spaces[SpaceId::Data].pending;
         // Send PATH_ABANDON
         pending_space
@@ -703,8 +723,6 @@ impl Connection {
         debug_assert!(!self.state.is_drained()); // requirement for endpoint_events, checked in `close_path_inner`
         self.endpoint_events
             .push_back(EndpointEventInner::RetireResetToken(path_id));
-
-        self.abandoned_paths.insert(path_id);
 
         for timer in PathTimer::VALUES {
             // match for completeness
@@ -2907,29 +2925,34 @@ impl Connection {
         &mut self,
         now: Instant,
         space: SpaceId,
+        recv_path: PathId,
         ack: frame::Ack,
     ) -> Result<(), TransportError> {
         // All ACKs are referencing path 0
         let path = PathId::ZERO;
-        self.inner_on_ack_received(now, space, path, ack)
+        self.inner_on_ack_received(now, space, path, recv_path, ack)
     }
 
     fn on_path_ack_received(
         &mut self,
         now: Instant,
         space: SpaceId,
+        recv_path: PathId,
         path_ack: frame::PathAck,
     ) -> Result<(), TransportError> {
         let (ack, path) = path_ack.into_ack();
-        self.inner_on_ack_received(now, space, path, ack)
+        self.inner_on_ack_received(now, space, path, recv_path, ack)
     }
 
     /// Handles an ACK frame acknowledging packets sent on *path*.
+    ///
+    /// *recv_path* is the path the ACK frame itself arrived on.
     fn inner_on_ack_received(
         &mut self,
         now: Instant,
         space: SpaceId,
         path: PathId,
+        recv_path: PathId,
         ack: frame::Ack,
     ) -> Result<(), TransportError> {
         if !self.spaces[space].number_spaces.contains_key(&path) {
@@ -3050,12 +3073,19 @@ impl Connection {
                     .largest_acked_packet_send_time,
             );
 
-            let next_pn = self.spaces[space].for_path(path).next_packet_number;
-            let path_data = self.path_data_mut(path);
-            // TODO(@divma): should be a method of path, should be contained in a single place
-            path_data.rtt.update(ack_delay, rtt);
-            if path_data.first_packet_after_rtt_sample.is_none() {
-                path_data.first_packet_after_rtt_sample = Some((space.kind(), next_pn));
+            // Per-path RTT must be measured from acknowledgments that came
+            // back on the same path: an ack for this path's packets received
+            // on another path measures a mixed forward/return route and would
+            // pollute this path's estimator (and everything derived from it,
+            // like PTO and congestion control).
+            if recv_path == path {
+                let next_pn = self.spaces[space].for_path(path).next_packet_number;
+                let path_data = self.path_data_mut(path);
+                // TODO(@divma): should be a method of path, should be contained in a single place
+                path_data.rtt.update(ack_delay, rtt);
+                if path_data.first_packet_after_rtt_sample.is_none() {
+                    path_data.first_packet_after_rtt_sample = Some((space.kind(), next_pn));
+                }
             }
         }
 
@@ -3395,9 +3425,13 @@ impl Connection {
         );
     }
 
-    /// Drops the path state, declaring any remaining in-flight packets as lost
-    fn discard_path(&mut self, path_id: PathId, now: Instant) {
-        trace!(%path_id, "dropping path state");
+    /// Declare every remaining sent packet on a path lost so its data is
+    /// retransmitted (on the remaining paths) without further delay.
+    ///
+    /// Called from [`Self::discard_path`] when the path's drain period ends,
+    /// and early from [`Self::abandon_path`] for paths that are already known
+    /// to be dead locally. Idempotent: a second call finds nothing left.
+    fn declare_path_packets_lost(&mut self, path_id: PathId, now: Instant) {
         let path = self.path_data(path_id);
         let in_flight_mtu_probe = path.mtud.in_flight_mtu_probe();
 
@@ -3418,7 +3452,7 @@ impl Connection {
                 %path_id,
                 count = lost_pns.len(),
                 lost_bytes = size_of_lost_packets,
-                "packets lost on path abandon"
+                "remaining packets on path declared lost"
             );
             self.handle_lost_packets(
                 SpaceId::Data,
@@ -3431,6 +3465,12 @@ impl Connection {
                 size_of_lost_packets,
             );
         }
+    }
+
+    /// Drops the path state, declaring any remaining in-flight packets as lost
+    fn discard_path(&mut self, path_id: PathId, now: Instant) {
+        trace!(%path_id, "dropping path state");
+        self.declare_path_packets_lost(path_id, now);
         // Before removing the path, we fetch the final path stats via `Self::path_stats`.
         // This ensures snapshot values (like rtt) are properly updated.
         let path_stats = self.path_stats(path_id).unwrap_or_default();
@@ -4889,12 +4929,12 @@ impl Connection {
                     self.read_crypto(packet.header.space().into(), &frame, payload_len)?;
                 }
                 Frame::Ack(ack) => {
-                    self.on_ack_received(now, packet.header.space().into(), ack)?;
+                    self.on_ack_received(now, packet.header.space().into(), path_id, ack)?;
                 }
                 Frame::PathAck(ack) => {
                     span.as_ref()
                         .map(|span| span.record("path", tracing::field::display(&ack.path_id)));
-                    self.on_path_ack_received(now, packet.header.space().into(), ack)?;
+                    self.on_path_ack_received(now, packet.header.space().into(), path_id, ack)?;
                 }
                 Frame::Close(reason) => {
                     self.state
@@ -5007,7 +5047,7 @@ impl Connection {
                     }
                 }
                 Frame::Ack(ack) => {
-                    self.on_ack_received(now, SpaceId::Data, ack)?;
+                    self.on_ack_received(now, SpaceId::Data, path_id, ack)?;
                 }
                 Frame::PathAck(ack) => {
                     if !self.is_multipath_negotiated() {
@@ -5016,7 +5056,7 @@ impl Connection {
                         ));
                     }
                     span.record("path", tracing::field::display(&ack.path_id));
-                    self.on_path_ack_received(now, SpaceId::Data, ack)?;
+                    self.on_path_ack_received(now, SpaceId::Data, path_id, ack)?;
                 }
                 Frame::Padding | Frame::Ping => {}
                 Frame::Close(reason) => {
